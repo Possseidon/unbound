@@ -6,5 +6,3 @@
 !.gitignore
 
 /target/
-
-/Cargo.lock
