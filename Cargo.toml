@@ -1,6 +1,6 @@
 [workspace]
 members = ["unbound-client", "unbound-server", "unbound-shared"]
-default-members = ["unbound-client"]
+default-members = ["unbound-client", "unbound-shared"]
 resolver = "2"
 
 [workspace.dependencies]
