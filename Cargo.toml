@@ -1,0 +1,13 @@
+[workspace]
+members = ["unbound-client", "unbound-server", "unbound-shared"]
+default-members = ["unbound-client"]
+resolver = "2"
+
+[workspace.dependencies]
+unbound-shared = { path = "unbound-shared" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
