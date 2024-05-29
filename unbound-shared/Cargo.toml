@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+array-init.workspace = true
+arrayvec.workspace = true
+bevy.workspace = true
+enum-map.workspace = true
+enumset.workspace = true
+itertools.workspace = true
