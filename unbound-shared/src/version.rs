@@ -459,7 +459,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_version() {
+    fn new_version() {
         let version = Version::new(0, 1, 2);
         assert_eq!(
             version,
@@ -482,26 +482,26 @@ mod tests {
 
     #[test]
     #[should_panic = "version must be at least 0.1.0"]
-    fn test_new_version_panics() {
+    fn new_version_panics() {
         Version::new(0, 0, 1);
     }
 
     #[test]
-    fn test_is_dev() {
+    fn is_dev() {
         let version = Version::new(0, 1, 2);
         assert!(version.is_dev());
         assert!(!version.is_release());
     }
 
     #[test]
-    fn test_is_release() {
+    fn is_release() {
         let version = Version::new(1, 2, 3);
         assert!(version.is_release());
         assert!(!version.is_dev());
     }
 
     #[test]
-    fn test_as_dev() {
+    fn as_dev() {
         let version = Version::new(0, 1, 2);
         assert_eq!(
             version.as_dev(),
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn test_as_release() {
+    fn as_release() {
         let version = Version::new(1, 2, 3);
         assert_eq!(
             version.as_release(),
@@ -532,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn test_major_minor_patch() {
+    fn major_minor_patch() {
         let version = Version::new(0, 1, 2);
         assert_eq!(version.major(), 0);
         assert_eq!(version.minor(), 1);
@@ -545,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn test_as_array() {
+    fn as_array() {
         let version = Version::new(1, 2, 3);
         assert_eq!(version.as_array(), [1, 2, 3]);
 
@@ -554,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bump_dev_version() {
+    fn bump_dev_version() {
         let version = Version::new(0, 1, 2);
         assert_eq!(version.bump(Change::Fix), Version::new(0, 1, 3));
         assert_eq!(
@@ -565,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bump_release_version() {
+    fn bump_release_version() {
         let version = Version::new(1, 2, 3);
         assert_eq!(version.bump(Change::Fix), Version::new(1, 2, 4));
         assert_eq!(
@@ -577,36 +577,36 @@ mod tests {
 
     #[test]
     #[should_panic = "patch version overflow"]
-    fn test_bump_dev_version_patch_overflow() {
+    fn bump_dev_version_patch_overflow() {
         Version::new(0, 1, u64::MAX).bump(Change::BackwardsCompatible);
     }
 
     #[test]
     #[should_panic = "minor version overflow"]
-    fn test_bump_dev_version_minor_overflow() {
+    fn bump_dev_version_minor_overflow() {
         Version::new(0, u64::MAX, 0).bump(Change::Breaking);
     }
 
     #[test]
     #[should_panic = "patch version overflow"]
-    fn test_bump_release_version_patch_overflow() {
+    fn bump_release_version_patch_overflow() {
         Version::new(1, 0, u64::MAX).bump(Change::Fix);
     }
 
     #[test]
     #[should_panic = "minor version overflow"]
-    fn test_bump_release_version_minor_overflow() {
+    fn bump_release_version_minor_overflow() {
         Version::new(1, u64::MAX, 0).bump(Change::BackwardsCompatible);
     }
 
     #[test]
     #[should_panic = "major version overflow"]
-    fn test_bump_release_version_major_overflow() {
+    fn bump_release_version_major_overflow() {
         Version::new(u64::MAX, 0, 0).bump(Change::Breaking);
     }
 
     #[test]
-    fn test_display_version() {
+    fn display_version() {
         let version = Version::new(0, 1, 2);
         assert_eq!(version.to_string(), "0.1.2");
 
@@ -615,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn test_meets_dev_version_req() {
+    fn meets_dev_version_req() {
         let require_0_2_1 = VersionReq::dev(NonZeroU64::new(2).unwrap(), 1);
 
         assert!(!Version::new(0, 2, 0).meets(require_0_2_1));
@@ -625,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn test_meets_release_version_req() {
+    fn meets_release_version_req() {
         let require_1_2_0 = VersionReq::release(NonZeroU64::MIN, 2);
 
         assert!(!Version::new(1, 1, u64::MAX).meets(require_1_2_0));
@@ -635,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn test_version_order() {
+    fn version_order() {
         let versions = [
             Version::MIN, // 0.1.0
             Version::new(0, 1, 1),
