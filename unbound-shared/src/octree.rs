@@ -1,6 +1,8 @@
+pub mod iterator;
 mod node;
 pub mod octant;
 
+use iterator::{OctreeIterator, OctreeValueIterator};
 use node::Node;
 use octant::Octant;
 
@@ -15,7 +17,7 @@ pub struct Octree<T> {
 
 impl<T> Octree<T> {
     /// Wraps the given `value` in an [`Octree`].
-    pub fn new(value: T) -> Self {
+    pub const fn new(value: T) -> Self {
         Self {
             root: Node::Value(value),
         }
@@ -40,6 +42,30 @@ impl<T> Octree<T> {
     {
         // ignore the return value regarding merging; the root has no parent
         self.root.set(octant.into_iter(), value);
+    }
+
+    /// Returns an iterator over all values with their respective octant.
+    ///
+    /// Iterated octants are relative to the given `octant`.
+    ///
+    /// Iteration order is by octant.
+    ///
+    /// This also works if the given `octant` does not exist as an actual leaf node. The iterator
+    /// will simply yield [`Octant::ROOT`] with the corresponding value.
+    pub fn values(&self, octant: Octant) -> OctreeValueIterator<T> {
+        match self.root.find_node(octant) {
+            Ok(node) => OctreeValueIterator::iterator(node),
+            Err((_, _, value)) => OctreeValueIterator::value(value),
+        }
+    }
+}
+
+impl<'a, T> IntoIterator for &'a Octree<T> {
+    type Item = (Octant, &'a T);
+    type IntoIter = OctreeIterator<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        OctreeIterator::new(&self.root)
     }
 }
 
@@ -122,5 +148,151 @@ mod tests {
         }
 
         assert_eq!(octree.get(octant), Some(&OctreeDepth::MAX.get()));
+    }
+
+    #[test]
+    fn octree_iterate_homogeneous() {
+        let octree = Octree::new(0);
+
+        let mut iter = octree.into_iter();
+        assert_eq!(iter.next(), Some((Octant::ROOT, &0)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn octree_iterate() {
+        let mut octree = Octree::new(0);
+        octree.set(Octant::new(Corner3::X0Y0Z0), 1);
+        octree.set(Octant::new(Corner3::X0Y1Z0), 2);
+
+        let mut iter = octree.into_iter();
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z0), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y1Z0), &2)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y1Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z1), &0)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn octree_iterate_deeper() {
+        let mut octree = Octree::new(0);
+        let a = Octant::new(Corner3::X0Y1Z0);
+        let b = a.with_corner(Corner3::X0Y0Z1);
+        octree.set(a, 1);
+        octree.set(b, 2);
+
+        let mut iter = octree.into_iter();
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z0), &0)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X0Y0Z0), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X1Y0Z0), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X0Y1Z0), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X1Y1Z0), &1)));
+        assert_eq!(iter.next(), Some((b, &2)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X1Y0Z1), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X0Y1Z1), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X1Y1Z1), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y1Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z1), &0)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn octree_iterate_max_depth() {
+        let mut max_depth_octant = Octant::ROOT;
+        for _ in 0..OctreeDepth::MAX.get() {
+            max_depth_octant = max_depth_octant.with_corner(Corner3::X0Y0Z0);
+        }
+        let mut octree = Octree::new(0);
+        octree.set(max_depth_octant, 1);
+
+        let mut iter = octree.into_iter();
+        assert_eq!(iter.next(), Some((max_depth_octant, &1)));
+        assert_eq!(iter.count(), usize::from(OctreeDepth::MAX.get()) * 7);
+        assert!(iter.all(|(_, i)| i == &0));
+    }
+
+    #[test]
+    fn octree_iterate_bidirectional() {
+        let mut octree = Octree::new(0);
+        let a = Octant::new(Corner3::X0Y1Z0);
+        let b = a.with_corner(Corner3::X0Y0Z1);
+        octree.set(a, 1);
+        octree.set(b, 2);
+
+        let mut iter = octree.into_iter();
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z0), &0)));
+        assert_eq!(iter.next_back(), Some((Octant::new(Corner3::X1Y1Z1), &0)));
+        assert_eq!(iter.next_back(), Some((Octant::new(Corner3::X0Y1Z1), &0)));
+        assert_eq!(iter.next_back(), Some((Octant::new(Corner3::X1Y0Z1), &0)));
+        assert_eq!(iter.next_back(), Some((Octant::new(Corner3::X0Y0Z1), &0)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X0Y0Z0), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X1Y0Z0), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X0Y1Z0), &1)));
+        assert_eq!(iter.next_back(), Some((Octant::new(Corner3::X1Y1Z0), &0)));
+        assert_eq!(iter.next_back(), Some((a.with_corner(Corner3::X1Y1Z1), &1)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X1Y1Z0), &1)));
+        assert_eq!(iter.next_back(), Some((a.with_corner(Corner3::X0Y1Z1), &1)));
+        assert_eq!(iter.next(), Some((b, &2)));
+        assert_eq!(iter.next(), Some((a.with_corner(Corner3::X1Y0Z1), &1)));
+        assert_eq!(iter.next_back(), None);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn octree_values_root() {
+        let mut octree = Octree::new(0);
+        octree.set(Octant::new(Corner3::X0Y0Z0), 1);
+
+        let mut iter = octree.values(Octant::ROOT);
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z0), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y1Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z0), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y1Z1), &0)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z1), &0)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn octree_values_partial() {
+        let mut octree = Octree::new(0);
+        let a = Octant::new(Corner3::X0Y0Z0);
+        let b = a.with_corner(Corner3::X1Y0Z0);
+        octree.set(a, 1);
+        octree.set(b, 2);
+
+        // yielded octants are relative to `a`
+        let mut iter = octree.values(a);
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z0), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z0), &2)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y1Z0), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z0), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y0Z1), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y0Z1), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X0Y1Z1), &1)));
+        assert_eq!(iter.next(), Some((Octant::new(Corner3::X1Y1Z1), &1)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn octree_values_not_split() {
+        let mut octree = Octree::new(0);
+        let a = Octant::new(Corner3::X0Y0Z0);
+        octree.set(a, 1);
+
+        let mut iter = octree.values(a.with_corner(Corner3::X0Y0Z0));
+        assert_eq!(iter.next(), Some((Octant::ROOT, &1)));
+        assert_eq!(iter.next(), None);
     }
 }

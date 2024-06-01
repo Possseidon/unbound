@@ -8,6 +8,7 @@ array-init.workspace = true
 arrayvec.workspace = true
 bevy.workspace = true
 bitvec.workspace = true
+derive-where.workspace = true
 enum-map.workspace = true
 enumset.workspace = true
 itertools.workspace = true

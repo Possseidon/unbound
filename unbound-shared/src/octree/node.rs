@@ -11,7 +11,7 @@ pub(crate) enum Node<T> {
     /// A leaf node holding a `T`.
     Value(T),
     /// A node that was split into 8 octants.
-    Octants(Octants<T>),
+    Octants(Box<Octants<T>>),
 }
 
 impl<T: Default> Default for Node<T> {
@@ -21,17 +21,32 @@ impl<T: Default> Default for Node<T> {
 }
 
 impl<T> Node<T> {
-    /// Returns the value at the specified octant.
+    /// Finds the [`Node`] at the specified `octant`.
     ///
-    /// Returns [`None`] if the specified octant contains multiple different values.
-    pub(crate) fn get(&self, octant: Octant) -> Option<&T> {
+    /// If there is no [`Node`] for the specified `octant`, it instead returns an error containing
+    /// the closest [`Octant`] that _does_ exist as well as its [`Node`] and value for convenience.
+    pub(crate) fn find_node(&self, octant: Octant) -> Result<&Node<T>, (Octant, &Node<T>, &T)> {
+        let mut traversed = Octant::ROOT;
         let mut current = self;
-        let mut corners = octant.into_iter();
-        loop {
+        for corner in octant {
             match current {
-                Node::Value(value) => break Some(value),
-                Node::Octants(octants) => current = &octants[corners.next()?],
+                Node::Value(value) => return Err((traversed, current, value)),
+                Node::Octants(octants) => {
+                    traversed = traversed.with_corner(corner);
+                    current = &octants[corner];
+                }
             }
+        }
+        Ok(current)
+    }
+
+    /// Returns the value at the specified `octant`.
+    ///
+    /// Returns [`None`] if the specified `octant` contains multiple different values.
+    pub(crate) fn get(&self, octant: Octant) -> Option<&T> {
+        match self.find_node(octant) {
+            Ok(node) => node.as_value(),
+            Err((_, _, value)) => Some(value),
         }
     }
 
@@ -84,7 +99,7 @@ impl<T> Node<T> {
         }
     }
 
-    /// Splits along the given corners and returns a mutable reference to the final [`Node`].
+    /// Splits along the specified `corners` and returns a mutable reference to the final [`Node`].
     ///
     /// # Panics
     ///
@@ -147,7 +162,7 @@ impl<T> Node<T> {
         }
     }
 
-    fn into_octants(self) -> Octants<T> {
+    fn into_octants(self) -> Box<Octants<T>> {
         if let Self::Octants(octants) = self {
             octants
         } else {
@@ -160,7 +175,7 @@ impl<T> Node<T> {
     /// # Panics
     ///
     /// Panics if the node is not split.
-    fn octants(&self) -> &Octants<T> {
+    pub(crate) fn octants(&self) -> &Octants<T> {
         if let Self::Octants(octants) = self {
             octants
         } else {
@@ -182,4 +197,4 @@ impl<T> Node<T> {
     }
 }
 
-pub(crate) type Octants<T> = Box<EnumMap<Corner3, Node<T>>>;
+pub(crate) type Octants<T> = EnumMap<Corner3, Node<T>>;
