@@ -108,7 +108,6 @@ impl_index_for_vec! {
         i32: IVec2, IVec3, IVec4;
         u32: UVec2, UVec3, UVec4;
         bool: BVec2, BVec3, BVec4;
-
     ] {
         X => x,
     }
@@ -139,7 +138,6 @@ impl_index_for_vec! {
         i32: IVec2, IVec3, IVec4;
         u32: UVec2, UVec3, UVec4;
         bool: BVec2, BVec3, BVec4;
-
     ] {
         X => x,
         Y => y,
@@ -149,7 +147,7 @@ impl_index_for_vec! {
 /// A set of two-dimensional axes.
 pub type Axes2 = EnumSet<Axis2>;
 
-/// A three-dimensional axis; `X`, `Y`, or `Z`.
+/// A three-dimensional axis; `X`, `Y` or `Z`.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Axis3 {
@@ -184,7 +182,6 @@ impl_index_for_vec! {
         i32: IVec3, IVec4;
         u32: UVec3, UVec4;
         bool: BVec3, BVec4;
-
     ] {
         X => x,
         Y => y,
@@ -195,7 +192,7 @@ impl_index_for_vec! {
 /// A set of three-dimensional axes.
 pub type Axes3 = EnumSet<Axis3>;
 
-/// A four-dimensional axis; `X`, `Y`, `Z`, or `W`.
+/// A four-dimensional axis; `X`, `Y`, `Z` or `W`.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Axis4 {
@@ -221,7 +218,6 @@ impl_index_for_vec! {
         i32: IVec4;
         u32: UVec4;
         bool: BVec4;
-
     ] {
         X => x,
         Y => y,
