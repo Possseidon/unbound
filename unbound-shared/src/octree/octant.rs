@@ -34,7 +34,7 @@ impl Octant {
 
     /// Constructs a new [`Octant`] pointing to the given octant relative to the root of the octree.
     pub fn new(corner: Corner3) -> Self {
-        Self::ROOT.corner(corner)
+        Self::ROOT.with_corner(corner)
     }
 
     /// The number of corner traversals to reach this octant from the root of the octree.
@@ -53,6 +53,15 @@ impl Octant {
         Some(self)
     }
 
+    /// Returns the corner of the innermost octant.
+    pub fn last_corner(self) -> Option<Corner3> {
+        if self.is_root() {
+            None
+        } else {
+            Some(self.get_corner(OctreeDepth(self.depth().0 - 1)))
+        }
+    }
+
     /// Returns a child octant at the given corner.
     ///
     /// # Panics
@@ -61,11 +70,73 @@ impl Octant {
     /// returning e.g. a [`Result`] is that octrees are generally not used directly but wrapped by a
     /// different type. The responsibility for ensuring that the depth is not exceeded falls on that
     /// wrapper type.
-    pub fn corner(mut self, corner: Corner3) -> Self {
+    pub fn with_corner(mut self, corner: Corner3) -> Self {
         let index = self.depth();
         self.set_depth(OctreeDepth::new(index.0 + 1).expect("octant should not exceed max depth"));
         self.set_corner(index, corner);
         self
+    }
+
+    /// Shorthand for [`Self::corner`] with [`Corner3::X0Y0Z0`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the maximum depth has been exceeded. See [`Self::corner`] for more information.
+    pub fn with_first_corner(self) -> Self {
+        self.with_corner(Corner3::X0Y0Z0)
+    }
+
+    /// Shorthand for [`Self::corner`] with [`Corner3::X1Y1Z1`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the maximum depth has been exceeded. See [`Self::corner`] for more information.
+    pub fn with_last_corner(self) -> Self {
+        self.with_corner(Corner3::X1Y1Z1)
+    }
+
+    /// Returns the next (or previous) neighboring corner of this octant if any.
+    pub fn next_neighbor<const REVERSE: bool>(mut self) -> Option<Self> {
+        let (dir, last_corner) = if REVERSE {
+            (-1isize, Corner3::X0Y0Z0)
+        } else {
+            (1isize, Corner3::X1Y1Z1)
+        };
+        if self.is_root() {
+            return None;
+        }
+        let last = OctreeDepth(self.depth().0 - 1);
+        let corner = self.get_corner(last);
+        if corner == last_corner {
+            return None;
+        }
+        self.set_corner(
+            last,
+            Corner3::from_usize(
+                corner
+                    .into_usize()
+                    .checked_add_signed(dir)
+                    .expect("should not overflow"),
+            ),
+        );
+        Some(self)
+    }
+
+    /// Returns the next (or previous) octant.
+    ///
+    /// Similar to [`Octant::next_neighbor`], but returns the next [`Octant`] of the parent if there
+    /// is no immediate neighbor.
+    pub fn next_octant<const REVERSE: bool>(mut self) -> Option<Self> {
+        loop {
+            if let Some(neighbor) = self.next_neighbor::<REVERSE>() {
+                break Some(neighbor);
+            }
+            if let Some(parent) = self.parent() {
+                self = parent;
+            } else {
+                break None;
+            }
+        }
     }
 
     fn set_depth(&mut self, depth: OctreeDepth) {
@@ -202,18 +273,27 @@ impl OctreeDepth {
     pub const MAX: Self = Self(30);
 
     /// Constructs a new [`OctreeDepth`], returning [`None`] if the value is out of range.
-    pub fn new(index: u8) -> Option<Self> {
-        (index <= Self::MAX.0).then_some(Self(index))
+    pub const fn new(index: u8) -> Option<Self> {
+        if index <= Self::MAX.0 {
+            Some(Self(index))
+        } else {
+            None
+        }
     }
 
     /// Returns the depth as a [`u8`].
-    pub fn get(self) -> u8 {
+    pub const fn get(self) -> u8 {
         self.0
     }
 
     /// Adds the given value to the depth, saturating at the maximum.
-    pub fn saturating_add(self, rhs: u8) -> Self {
-        Self(self.0.saturating_add(rhs).min(Self::MAX.0))
+    pub const fn saturating_add(self, rhs: u8) -> Self {
+        let result = self.0.saturating_add(rhs);
+        if result > Self::MAX.0 {
+            Self(Self::MAX.0)
+        } else {
+            Self(result)
+        }
     }
 }
 
@@ -242,7 +322,7 @@ mod tests {
         let corner = Corner3::X0Y0Z0;
         let octant = Octant::new(corner);
         assert_eq!(octant.depth().0, 1);
-        let child = octant.corner(corner);
+        let child = octant.with_corner(corner);
         assert_eq!(child.depth().0, 2);
     }
 
@@ -256,7 +336,7 @@ mod tests {
     fn corner_max_depth() {
         let mut octant = Octant::ROOT;
         for _ in 0..OctreeDepth::MAX.0 {
-            octant = octant.corner(Corner3::X0Y0Z0);
+            octant = octant.with_corner(Corner3::X0Y0Z0);
         }
     }
 
@@ -265,7 +345,7 @@ mod tests {
     fn corner_exceeding_max_depth() {
         let mut octant = Octant::ROOT;
         for _ in 0..OctreeDepth::MAX.0 + 1 {
-            octant = octant.corner(Corner3::X0Y0Z0);
+            octant = octant.with_corner(Corner3::X0Y0Z0);
         }
     }
 
@@ -276,7 +356,7 @@ mod tests {
         let octant = Octant::new(Corner3::X0Y0Z0);
         assert_eq!(format!("{:?}", octant), "[X0Y0Z0]");
 
-        let octant = Octant::new(Corner3::X0Y1Z0).corner(Corner3::X1Y0Z1);
+        let octant = Octant::new(Corner3::X0Y1Z0).with_corner(Corner3::X1Y0Z1);
         assert_eq!(format!("{:?}", octant), "[X0Y1Z0, X1Y0Z1]");
     }
 
@@ -289,7 +369,7 @@ mod tests {
     #[test]
     fn octant_corners() {
         let mut corners = Octant::new(Corner3::X0Y0Z0)
-            .corner(Corner3::X1Y1Z1)
+            .with_corner(Corner3::X1Y1Z1)
             .into_iter();
         assert_eq!(corners.len(), 2);
         assert_eq!(corners.next(), Some(Corner3::X0Y0Z0));
@@ -303,7 +383,7 @@ mod tests {
     #[allow(clippy::iter_nth_zero)]
     fn octant_corners_nth() {
         let corners = Octant::new(Corner3::X0Y0Z0)
-            .corner(Corner3::X1Y1Z1)
+            .with_corner(Corner3::X1Y1Z1)
             .into_iter();
 
         assert_eq!(corners.clone().nth(0), Some(Corner3::X0Y0Z0));
@@ -315,9 +395,9 @@ mod tests {
     fn octant_corners_nth_max_depth() {
         let mut octant = Octant::ROOT;
         for _ in 0..OctreeDepth::MAX.0 - 1 {
-            octant = octant.corner(Corner3::X0Y0Z0);
+            octant = octant.with_corner(Corner3::X0Y0Z0);
         }
-        let corners = octant.corner(Corner3::X1Y1Z1).into_iter();
+        let corners = octant.with_corner(Corner3::X1Y1Z1).into_iter();
         let last = usize::from(OctreeDepth::MAX.0 - 1);
         assert_eq!(corners.clone().nth(last - 1), Some(Corner3::X0Y0Z0));
         assert_eq!(corners.clone().nth(last), Some(Corner3::X1Y1Z1));
@@ -329,5 +409,48 @@ mod tests {
         assert_eq!(OctreeDepth::new(OctreeDepth::MIN.0), Some(OctreeDepth::MIN));
         assert_eq!(OctreeDepth::new(OctreeDepth::MAX.0), Some(OctreeDepth::MAX));
         assert_eq!(OctreeDepth::new(OctreeDepth::MAX.0 + 1), None);
+    }
+
+    #[test]
+    fn octant_next_neighbor_root() {
+        assert_eq!(Octant::ROOT.next_neighbor::<false>(), None);
+        assert_eq!(Octant::ROOT.next_neighbor::<true>(), None);
+    }
+
+    #[test]
+    fn octant_next_neighbor() {
+        let neighbor = Octant::new(Corner3::X0Y0Z0).next_neighbor::<false>();
+        assert_eq!(neighbor, Some(Octant::new(Corner3::X1Y0Z0)));
+
+        let neighbor = Octant::new(Corner3::X1Y1Z1).next_neighbor::<true>();
+        assert_eq!(neighbor, Some(Octant::new(Corner3::X0Y1Z1)));
+    }
+
+    #[test]
+    fn octant_next_neighbor_none() {
+        assert_eq!(Octant::new(Corner3::X1Y1Z1).next_neighbor::<false>(), None);
+        assert_eq!(Octant::new(Corner3::X0Y0Z0).next_neighbor::<true>(), None);
+    }
+
+    #[test]
+    fn octant_next_octant() {
+        let next_octant = Octant::new(Corner3::X0Y0Z0).next_octant::<false>();
+        assert_eq!(next_octant, Some(Octant::new(Corner3::X1Y0Z0)));
+    }
+
+    #[test]
+    fn octant_next_octant_from_parent() {
+        let next_octant = Octant::new(Corner3::X0Y0Z0)
+            .with_corner(Corner3::X1Y1Z1)
+            .next_octant::<false>();
+        assert_eq!(next_octant, Some(Octant::new(Corner3::X1Y0Z0)));
+
+        let next_octant = Octant::new(Corner3::X0Y0Z0)
+            .with_corner(Corner3::X1Y1Z1)
+            .with_corner(Corner3::X1Y1Z1)
+            .with_corner(Corner3::X1Y1Z1)
+            .with_corner(Corner3::X1Y1Z1)
+            .next_octant::<false>();
+        assert_eq!(next_octant, Some(Octant::new(Corner3::X1Y0Z0)));
     }
 }

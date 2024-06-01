@@ -52,51 +52,51 @@ mod tests {
 
     #[test]
     fn octree_new() {
-        let tree = Octree::new(0);
-        assert_eq!(tree.get(Octant::ROOT), Some(&0));
+        let octree = Octree::new(0);
+        assert_eq!(octree.get(Octant::ROOT), Some(&0));
     }
 
     #[test]
     fn octree_set_root() {
-        let mut tree = Octree::new(0);
-        tree.set(Octant::ROOT, 1);
-        assert_eq!(tree.get(Octant::ROOT), Some(&1));
+        let mut octree = Octree::new(0);
+        octree.set(Octant::ROOT, 1);
+        assert_eq!(octree.get(Octant::ROOT), Some(&1));
     }
 
     #[test]
     fn octree_set_corner() {
-        let mut tree = Octree::new(0);
-        tree.set(Octant::new(Corner3::X0Y0Z0), 1);
-        assert_eq!(tree.get(Octant::new(Corner3::X0Y0Z0)), Some(&1));
-        assert_eq!(tree.get(Octant::new(Corner3::X0Y0Z1)), Some(&0));
+        let mut octree = Octree::new(0);
+        octree.set(Octant::new(Corner3::X0Y0Z0), 1);
+        assert_eq!(octree.get(Octant::new(Corner3::X0Y0Z0)), Some(&1));
+        assert_eq!(octree.get(Octant::new(Corner3::X0Y0Z1)), Some(&0));
     }
 
     #[test]
     fn octree_get_none() {
-        let mut tree = Octree::new(0);
-        tree.set(Octant::new(Corner3::X0Y0Z0), 1);
+        let mut octree = Octree::new(0);
+        octree.set(Octant::new(Corner3::X0Y0Z0), 1);
         // should return None, since the root node contains both 0 and 1
-        assert_eq!(tree.get(Octant::ROOT), None);
+        assert_eq!(octree.get(Octant::ROOT), None);
     }
 
     #[test]
     fn octree_set_merges() {
-        let mut tree = Octree::new(0);
-        tree.set(Octant::new(Corner3::X0Y0Z0), 1);
-        tree.set(Octant::new(Corner3::X0Y0Z0), 0);
+        let mut octree = Octree::new(0);
+        octree.set(Octant::new(Corner3::X0Y0Z0), 1);
+        octree.set(Octant::new(Corner3::X0Y0Z0), 0);
         // make sure the octant was actually merged; just checking the value is not enough
-        assert!(matches!(tree.root, Node::Value(0)))
+        assert!(matches!(octree.root, Node::Value(0)))
     }
 
     #[test]
     fn octree_set_deep() {
-        let mut tree = Octree::new(0);
+        let mut octree = Octree::new(0);
         let a = Octant::new(Corner3::X0Y0Z0);
-        let b = a.corner(Corner3::X0Y0Z0);
-        tree.set(b, 1);
-        assert_eq!(tree.get(b), Some(&1));
-        assert_eq!(tree.get(a), None);
-        assert_eq!(tree.get(a.corner(Corner3::X0Y0Z1)), Some(&0));
+        let b = a.with_corner(Corner3::X0Y0Z0);
+        octree.set(b, 1);
+        assert_eq!(octree.get(b), Some(&1));
+        assert_eq!(octree.get(a), None);
+        assert_eq!(octree.get(a.with_corner(Corner3::X0Y0Z1)), Some(&0));
     }
 
     #[test]
@@ -107,20 +107,20 @@ mod tests {
         // - puts a 2 in that octants first octant
         // - etc...
 
-        let mut tree = Octree::new(0);
+        let mut octree = Octree::new(0);
         let mut octant = Octant::ROOT;
         for i in 1..=OctreeDepth::MAX.get() {
-            octant = octant.corner(Corner3::X0Y0Z0);
-            tree.set(octant, i);
+            octant = octant.with_corner(Corner3::X0Y0Z0);
+            octree.set(octant, i);
         }
 
         let mut octant = Octant::ROOT;
         for i in 0..OctreeDepth::MAX.get() {
-            assert_eq!(tree.get(octant), None);
-            assert_eq!(tree.get(octant.corner(Corner3::X0Y0Z1)), Some(&i));
-            octant = octant.corner(Corner3::X0Y0Z0);
+            assert_eq!(octree.get(octant), None);
+            assert_eq!(octree.get(octant.with_corner(Corner3::X0Y0Z1)), Some(&i));
+            octant = octant.with_corner(Corner3::X0Y0Z0);
         }
 
-        assert_eq!(tree.get(octant), Some(&OctreeDepth::MAX.get()));
+        assert_eq!(octree.get(octant), Some(&OctreeDepth::MAX.get()));
     }
 }
