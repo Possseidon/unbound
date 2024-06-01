@@ -443,8 +443,7 @@ pub enum Corner3 {
 impl Corner3 {
     /// Returns the corner flipped along the given axis.
     ///
-    /// E.g. flipping [`Corner3::X0Y0Z0`] along [`Axis3::X`] returns
-    /// [`Corner3::X1Y0Z0`].
+    /// E.g. flipping [`Corner3::Origin`] along [`Axis3::X`] returns [`Corner3::X`].
     pub fn flipped(self, axis: Axis3) -> Corner3 {
         match (self as u8) ^ (1 << axis as u8) {
             0 => Self::Origin,
@@ -504,7 +503,7 @@ impl Corner3 {
         })
     }
 
-    /// Whether the number of single axis moves required reach [`Corner3::X0Y0Z0`] is even.
+    /// Whether the number of single axis moves required to reach [`Corner3::Origin`] is even.
     pub fn is_even(self) -> bool {
         matches!(
             self,
@@ -512,7 +511,7 @@ impl Corner3 {
         )
     }
 
-    /// Whether the number of single axis moves required reach [`Corner3::X0Y0Z0`] is odd.
+    /// Whether the number of single axis moves required to reach [`Corner3::Origin`] is odd.
     pub fn is_odd(self) -> bool {
         !self.is_even()
     }

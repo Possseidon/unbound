@@ -77,24 +77,6 @@ impl Octant {
         self
     }
 
-    /// Shorthand for [`Self::corner`] with [`Corner3::X0Y0Z0`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the maximum depth has been exceeded. See [`Self::corner`] for more information.
-    pub fn with_first_corner(self) -> Self {
-        self.with_corner(Corner3::Origin)
-    }
-
-    /// Shorthand for [`Self::corner`] with [`Corner3::X1Y1Z1`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the maximum depth has been exceeded. See [`Self::corner`] for more information.
-    pub fn with_last_corner(self) -> Self {
-        self.with_corner(Corner3::XYZ)
-    }
-
     /// Returns the next (or previous) neighboring corner of this octant if any.
     pub fn next_neighbor<const REVERSE: bool>(mut self) -> Option<Self> {
         let (dir, last_corner) = if REVERSE {
@@ -354,10 +336,10 @@ mod tests {
         assert_eq!(format!("{:?}", Octant::ROOT), "[]");
 
         let octant = Octant::new(Corner3::Origin);
-        assert_eq!(format!("{:?}", octant), "[X0Y0Z0]");
+        assert_eq!(format!("{:?}", octant), "[Origin]");
 
         let octant = Octant::new(Corner3::Y).with_corner(Corner3::XZ);
-        assert_eq!(format!("{:?}", octant), "[X0Y1Z0, X1Y0Z1]");
+        assert_eq!(format!("{:?}", octant), "[Y, XZ]");
     }
 
     #[test]
