@@ -97,9 +97,9 @@ impl<'a, T> OctantNode<'a, T> {
     /// Finds the first (or last) [`Node::Value`] in the octree.
     fn find<const REVERSE: bool>(mut node: &'a Node<T>) -> Self {
         let corner = if REVERSE {
-            Corner3::X1Y1Z1
+            Corner3::XYZ
         } else {
-            Corner3::X0Y0Z0
+            Corner3::Origin
         };
 
         let mut octant = Octant::ROOT;
@@ -125,9 +125,9 @@ impl<'a, T> OctantNode<'a, T> {
     /// Assumes that there is a next [`Octant`] and advances to it.
     fn move_next<const REVERSE: bool>(&mut self, root: &'a Node<T>) {
         let corner = if REVERSE {
-            Corner3::X1Y1Z1
+            Corner3::XYZ
         } else {
-            Corner3::X0Y0Z0
+            Corner3::Origin
         };
 
         self.octant = if let Some(next_octant) = self.octant.next_neighbor::<REVERSE>() {

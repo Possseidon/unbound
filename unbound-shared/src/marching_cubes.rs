@@ -67,14 +67,14 @@ impl PlanePoint {
     /// The solid corner that this point on the plane divides from.
     pub fn corner(self) -> Corner3 {
         match self.corner_facing & 0b111 {
-            0 => Corner3::X0Y0Z0,
-            1 => Corner3::X1Y0Z0,
-            2 => Corner3::X0Y1Z0,
-            3 => Corner3::X1Y1Z0,
-            4 => Corner3::X0Y0Z1,
-            5 => Corner3::X1Y0Z1,
-            6 => Corner3::X0Y1Z1,
-            7 => Corner3::X1Y1Z1,
+            0 => Corner3::Origin,
+            1 => Corner3::X,
+            2 => Corner3::Y,
+            3 => Corner3::XY,
+            4 => Corner3::Z,
+            5 => Corner3::XZ,
+            6 => Corner3::YZ,
+            7 => Corner3::XYZ,
             _ => unreachable!(),
         }
     }
@@ -87,12 +87,12 @@ impl PlanePoint {
     /// The facing direction pointing from the solid [`PlanePoint::corner`] to a non-solid point.
     pub fn facing(self) -> Facing3 {
         match self.corner_facing >> 3 {
-            0 => Facing3::X0,
-            1 => Facing3::X1,
-            2 => Facing3::Y0,
-            3 => Facing3::Y1,
-            4 => Facing3::Z0,
-            5 => Facing3::Z1,
+            0 => Facing3::NegX,
+            1 => Facing3::PosX,
+            2 => Facing3::NegY,
+            3 => Facing3::PosY,
+            4 => Facing3::NegZ,
+            5 => Facing3::PosZ,
             _ => unreachable!(),
         }
     }

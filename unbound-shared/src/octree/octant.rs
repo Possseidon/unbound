@@ -83,7 +83,7 @@ impl Octant {
     ///
     /// Panics if the maximum depth has been exceeded. See [`Self::corner`] for more information.
     pub fn with_first_corner(self) -> Self {
-        self.with_corner(Corner3::X0Y0Z0)
+        self.with_corner(Corner3::Origin)
     }
 
     /// Shorthand for [`Self::corner`] with [`Corner3::X1Y1Z1`].
@@ -92,15 +92,15 @@ impl Octant {
     ///
     /// Panics if the maximum depth has been exceeded. See [`Self::corner`] for more information.
     pub fn with_last_corner(self) -> Self {
-        self.with_corner(Corner3::X1Y1Z1)
+        self.with_corner(Corner3::XYZ)
     }
 
     /// Returns the next (or previous) neighboring corner of this octant if any.
     pub fn next_neighbor<const REVERSE: bool>(mut self) -> Option<Self> {
         let (dir, last_corner) = if REVERSE {
-            (-1isize, Corner3::X0Y0Z0)
+            (-1isize, Corner3::Origin)
         } else {
-            (1isize, Corner3::X1Y1Z1)
+            (1isize, Corner3::XYZ)
         };
         if self.is_root() {
             return None;
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn new() {
-        let corner = Corner3::X0Y0Z0;
+        let corner = Corner3::Origin;
         let octant = Octant::new(corner);
         assert!(!octant.is_root());
         assert_eq!(octant.depth().0, 1);
@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn depth() {
-        let corner = Corner3::X0Y0Z0;
+        let corner = Corner3::Origin;
         let octant = Octant::new(corner);
         assert_eq!(octant.depth().0, 1);
         let child = octant.with_corner(corner);
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn parent() {
-        let octant = Octant::new(Corner3::X0Y0Z0);
+        let octant = Octant::new(Corner3::Origin);
         assert!(octant.parent().unwrap().is_root());
     }
 
@@ -336,7 +336,7 @@ mod tests {
     fn corner_max_depth() {
         let mut octant = Octant::ROOT;
         for _ in 0..OctreeDepth::MAX.0 {
-            octant = octant.with_corner(Corner3::X0Y0Z0);
+            octant = octant.with_corner(Corner3::Origin);
         }
     }
 
@@ -345,7 +345,7 @@ mod tests {
     fn corner_exceeding_max_depth() {
         let mut octant = Octant::ROOT;
         for _ in 0..OctreeDepth::MAX.0 + 1 {
-            octant = octant.with_corner(Corner3::X0Y0Z0);
+            octant = octant.with_corner(Corner3::Origin);
         }
     }
 
@@ -353,28 +353,28 @@ mod tests {
     fn octant_debug() {
         assert_eq!(format!("{:?}", Octant::ROOT), "[]");
 
-        let octant = Octant::new(Corner3::X0Y0Z0);
+        let octant = Octant::new(Corner3::Origin);
         assert_eq!(format!("{:?}", octant), "[X0Y0Z0]");
 
-        let octant = Octant::new(Corner3::X0Y1Z0).with_corner(Corner3::X1Y0Z1);
+        let octant = Octant::new(Corner3::Y).with_corner(Corner3::XZ);
         assert_eq!(format!("{:?}", octant), "[X0Y1Z0, X1Y0Z1]");
     }
 
     #[test]
     fn octant_eq_edge_case() {
         // if PartialEq was just derived, this assertion would fail
-        assert_eq!(Octant::new(Corner3::X1Y1Z1).parent(), Some(Octant::ROOT));
+        assert_eq!(Octant::new(Corner3::XYZ).parent(), Some(Octant::ROOT));
     }
 
     #[test]
     fn octant_corners() {
-        let mut corners = Octant::new(Corner3::X0Y0Z0)
-            .with_corner(Corner3::X1Y1Z1)
+        let mut corners = Octant::new(Corner3::Origin)
+            .with_corner(Corner3::XYZ)
             .into_iter();
         assert_eq!(corners.len(), 2);
-        assert_eq!(corners.next(), Some(Corner3::X0Y0Z0));
+        assert_eq!(corners.next(), Some(Corner3::Origin));
         assert_eq!(corners.len(), 1);
-        assert_eq!(corners.next(), Some(Corner3::X1Y1Z1));
+        assert_eq!(corners.next(), Some(Corner3::XYZ));
         assert_eq!(corners.len(), 0);
         assert_eq!(corners.next(), None);
     }
@@ -382,12 +382,12 @@ mod tests {
     #[test]
     #[allow(clippy::iter_nth_zero)]
     fn octant_corners_nth() {
-        let corners = Octant::new(Corner3::X0Y0Z0)
-            .with_corner(Corner3::X1Y1Z1)
+        let corners = Octant::new(Corner3::Origin)
+            .with_corner(Corner3::XYZ)
             .into_iter();
 
-        assert_eq!(corners.clone().nth(0), Some(Corner3::X0Y0Z0));
-        assert_eq!(corners.clone().nth(1), Some(Corner3::X1Y1Z1));
+        assert_eq!(corners.clone().nth(0), Some(Corner3::Origin));
+        assert_eq!(corners.clone().nth(1), Some(Corner3::XYZ));
         assert_eq!(corners.clone().nth(2), None);
     }
 
@@ -395,12 +395,12 @@ mod tests {
     fn octant_corners_nth_max_depth() {
         let mut octant = Octant::ROOT;
         for _ in 0..OctreeDepth::MAX.0 - 1 {
-            octant = octant.with_corner(Corner3::X0Y0Z0);
+            octant = octant.with_corner(Corner3::Origin);
         }
-        let corners = octant.with_corner(Corner3::X1Y1Z1).into_iter();
+        let corners = octant.with_corner(Corner3::XYZ).into_iter();
         let last = usize::from(OctreeDepth::MAX.0 - 1);
-        assert_eq!(corners.clone().nth(last - 1), Some(Corner3::X0Y0Z0));
-        assert_eq!(corners.clone().nth(last), Some(Corner3::X1Y1Z1));
+        assert_eq!(corners.clone().nth(last - 1), Some(Corner3::Origin));
+        assert_eq!(corners.clone().nth(last), Some(Corner3::XYZ));
         assert_eq!(corners.clone().nth(last + 1), None);
     }
 
@@ -419,38 +419,38 @@ mod tests {
 
     #[test]
     fn octant_next_neighbor() {
-        let neighbor = Octant::new(Corner3::X0Y0Z0).next_neighbor::<false>();
-        assert_eq!(neighbor, Some(Octant::new(Corner3::X1Y0Z0)));
+        let neighbor = Octant::new(Corner3::Origin).next_neighbor::<false>();
+        assert_eq!(neighbor, Some(Octant::new(Corner3::X)));
 
-        let neighbor = Octant::new(Corner3::X1Y1Z1).next_neighbor::<true>();
-        assert_eq!(neighbor, Some(Octant::new(Corner3::X0Y1Z1)));
+        let neighbor = Octant::new(Corner3::XYZ).next_neighbor::<true>();
+        assert_eq!(neighbor, Some(Octant::new(Corner3::YZ)));
     }
 
     #[test]
     fn octant_next_neighbor_none() {
-        assert_eq!(Octant::new(Corner3::X1Y1Z1).next_neighbor::<false>(), None);
-        assert_eq!(Octant::new(Corner3::X0Y0Z0).next_neighbor::<true>(), None);
+        assert_eq!(Octant::new(Corner3::XYZ).next_neighbor::<false>(), None);
+        assert_eq!(Octant::new(Corner3::Origin).next_neighbor::<true>(), None);
     }
 
     #[test]
     fn octant_next_octant() {
-        let next_octant = Octant::new(Corner3::X0Y0Z0).next_octant::<false>();
-        assert_eq!(next_octant, Some(Octant::new(Corner3::X1Y0Z0)));
+        let next_octant = Octant::new(Corner3::Origin).next_octant::<false>();
+        assert_eq!(next_octant, Some(Octant::new(Corner3::X)));
     }
 
     #[test]
     fn octant_next_octant_from_parent() {
-        let next_octant = Octant::new(Corner3::X0Y0Z0)
-            .with_corner(Corner3::X1Y1Z1)
+        let next_octant = Octant::new(Corner3::Origin)
+            .with_corner(Corner3::XYZ)
             .next_octant::<false>();
-        assert_eq!(next_octant, Some(Octant::new(Corner3::X1Y0Z0)));
+        assert_eq!(next_octant, Some(Octant::new(Corner3::X)));
 
-        let next_octant = Octant::new(Corner3::X0Y0Z0)
-            .with_corner(Corner3::X1Y1Z1)
-            .with_corner(Corner3::X1Y1Z1)
-            .with_corner(Corner3::X1Y1Z1)
-            .with_corner(Corner3::X1Y1Z1)
+        let next_octant = Octant::new(Corner3::Origin)
+            .with_corner(Corner3::XYZ)
+            .with_corner(Corner3::XYZ)
+            .with_corner(Corner3::XYZ)
+            .with_corner(Corner3::XYZ)
             .next_octant::<false>();
-        assert_eq!(next_octant, Some(Octant::new(Corner3::X1Y0Z0)));
+        assert_eq!(next_octant, Some(Octant::new(Corner3::X)));
     }
 }

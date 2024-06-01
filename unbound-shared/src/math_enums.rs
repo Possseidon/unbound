@@ -233,23 +233,23 @@ pub type Axes4 = EnumSet<Axis4>;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Facing1 {
-    X0,
-    X1,
+    NegX,
+    PosX,
 }
 
 impl Facing1 {
     /// Returns the opposite facing direction.
     pub fn flipped(self) -> Self {
         match self {
-            Self::X0 => Self::X1,
-            Self::X1 => Self::X0,
+            Self::NegX => Self::PosX,
+            Self::PosX => Self::NegX,
         }
     }
 
     /// Returns the axis which the facing direction is along.
     pub fn axis(self) -> Axis1 {
         match self {
-            Self::X0 | Self::X1 => Axis1::X,
+            Self::NegX | Self::PosX => Axis1::X,
         }
     }
 }
@@ -257,15 +257,15 @@ impl Facing1 {
 impl From<Axis1> for Facing1 {
     fn from(value: Axis1) -> Self {
         match value {
-            Axis1::X => Self::X1,
+            Axis1::X => Self::PosX,
         }
     }
 }
 
 impl_from_for_scalar! {
     Facing1 for [f32, f64, i32] {
-        X0  => -1,
-        X1 =>  1,
+        NegX  => -1,
+        PosX =>  1,
     }
 }
 
@@ -275,28 +275,28 @@ pub type Facings1 = EnumSet<Facing1>;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Facing2 {
-    X0,
-    X1,
-    Y0,
-    Y1,
+    NegX,
+    PosX,
+    NegY,
+    PosY,
 }
 
 impl Facing2 {
     /// Returns the opposite facing direction.
     pub fn flipped(self) -> Self {
         match self {
-            Self::X0 => Self::X1,
-            Self::X1 => Self::X0,
-            Self::Y0 => Self::Y1,
-            Self::Y1 => Self::Y0,
+            Self::NegX => Self::PosX,
+            Self::PosX => Self::NegX,
+            Self::NegY => Self::PosY,
+            Self::PosY => Self::NegY,
         }
     }
 
     /// Returns the axis which the facing direction is along.
     pub fn axis(self) -> Axis2 {
         match self {
-            Facing2::X0 | Facing2::X1 => Axis2::X,
-            Facing2::Y0 | Facing2::Y1 => Axis2::Y,
+            Facing2::NegX | Facing2::PosX => Axis2::X,
+            Facing2::NegY | Facing2::PosY => Axis2::Y,
         }
     }
 }
@@ -304,18 +304,18 @@ impl Facing2 {
 impl From<Axis2> for Facing2 {
     fn from(value: Axis2) -> Self {
         match value {
-            Axis2::X => Self::X1,
-            Axis2::Y => Self::Y1,
+            Axis2::X => Self::PosX,
+            Axis2::Y => Self::PosY,
         }
     }
 }
 
 impl_from_for_vec! {
     Facing2 for [Vec2, DVec2, IVec2] {
-        X0 => (-1,  0),
-        X1 => ( 1,  0),
-        Y0 => ( 0, -1),
-        Y1 => ( 0,  1),
+        NegX => (-1,  0),
+        PosX => ( 1,  0),
+        NegY => ( 0, -1),
+        PosY => ( 0,  1),
     }
 }
 
@@ -325,24 +325,24 @@ pub type Facings2 = EnumSet<Facing2>;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Facing3 {
-    X0,
-    X1,
-    Y0,
-    Y1,
-    Z0,
-    Z1,
+    NegX,
+    PosX,
+    NegY,
+    PosY,
+    NegZ,
+    PosZ,
 }
 
 impl Facing3 {
     /// Returns the opposite facing direction.
     pub fn flipped(self) -> Self {
         match self {
-            Self::X0 => Self::X1,
-            Self::X1 => Self::X0,
-            Self::Y0 => Self::Y1,
-            Self::Y1 => Self::Y0,
-            Self::Z0 => Self::Z1,
-            Self::Z1 => Self::Z0,
+            Self::NegX => Self::PosX,
+            Self::PosX => Self::NegX,
+            Self::NegY => Self::PosY,
+            Self::PosY => Self::NegY,
+            Self::NegZ => Self::PosZ,
+            Self::PosZ => Self::NegZ,
         }
     }
 
@@ -353,7 +353,7 @@ impl Facing3 {
 
     /// Whether the facing direction points in the positive direction.
     pub fn is_positive(self) -> bool {
-        matches!(self, Self::X1 | Self::Y1 | Self::Z1)
+        matches!(self, Self::PosX | Self::PosY | Self::PosZ)
     }
 
     /// Whether the facing direction points in the negative direction.
@@ -364,9 +364,9 @@ impl Facing3 {
     /// Returns the axis which the facing direction is along.
     pub fn axis(self) -> Axis3 {
         match self {
-            Facing3::X0 | Facing3::X1 => Axis3::X,
-            Facing3::Y0 | Facing3::Y1 => Axis3::Y,
-            Facing3::Z0 | Facing3::Z1 => Axis3::Z,
+            Facing3::NegX | Facing3::PosX => Axis3::X,
+            Facing3::NegY | Facing3::PosY => Axis3::Y,
+            Facing3::NegZ | Facing3::PosZ => Axis3::Z,
         }
     }
 }
@@ -374,21 +374,21 @@ impl Facing3 {
 impl From<Axis3> for Facing3 {
     fn from(value: Axis3) -> Self {
         match value {
-            Axis3::X => Self::X1,
-            Axis3::Y => Self::Y1,
-            Axis3::Z => Self::Z1,
+            Axis3::X => Self::PosX,
+            Axis3::Y => Self::PosY,
+            Axis3::Z => Self::PosZ,
         }
     }
 }
 
 impl_from_for_vec! {
     Facing3 for [Vec3, Vec3A, DVec3, IVec3] {
-        X0 => (-1,  0,  0),
-        X1 => ( 1,  0,  0),
-        Y0 => ( 0, -1,  0),
-        Y1 => ( 0,  1,  0),
-        Z0 => ( 0,  0, -1),
-        Z1 => ( 0,  0,  1),
+        NegX => (-1,  0,  0),
+        PosX => ( 1,  0,  0),
+        NegY => ( 0, -1,  0),
+        PosY => ( 0,  1,  0),
+        NegZ => ( 0,  0, -1),
+        PosZ => ( 0,  0,  1),
     }
 }
 
@@ -398,29 +398,29 @@ pub type Facings3 = EnumSet<Facing3>;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Corner2 {
-    X0Y0,
-    X1Y0,
-    X0Y1,
-    X1Y1,
+    Origin,
+    X,
+    Y,
+    XY,
 }
 
 impl From<Facing2> for Corners2 {
     fn from(value: Facing2) -> Self {
         match value {
-            Facing2::X0 => Corner2::X0Y0 | Corner2::X0Y1,
-            Facing2::X1 => Corner2::X1Y0 | Corner2::X1Y1,
-            Facing2::Y0 => Corner2::X0Y0 | Corner2::X1Y0,
-            Facing2::Y1 => Corner2::X0Y1 | Corner2::X1Y1,
+            Facing2::NegX => Corner2::Origin | Corner2::Y,
+            Facing2::PosX => Corner2::X | Corner2::XY,
+            Facing2::NegY => Corner2::Origin | Corner2::X,
+            Facing2::PosY => Corner2::Y | Corner2::XY,
         }
     }
 }
 
 impl_from_for_vec! {
     Corner2 for [Vec2, DVec2, IVec2, UVec2] {
-        X0Y0 => (0, 0),
-        X1Y0 => (1, 0),
-        X0Y1 => (0, 1),
-        X1Y1 => (1, 1),
+        Origin => (0, 0),
+        X      => (1, 0),
+        Y      => (0, 1),
+        XY     => (1, 1),
     }
 }
 
@@ -430,14 +430,14 @@ pub type Corners2 = EnumSet<Corner2>;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Corner3 {
-    X0Y0Z0,
-    X1Y0Z0,
-    X0Y1Z0,
-    X1Y1Z0,
-    X0Y0Z1,
-    X1Y0Z1,
-    X0Y1Z1,
-    X1Y1Z1,
+    Origin,
+    X,
+    Y,
+    XY,
+    Z,
+    XZ,
+    YZ,
+    XYZ,
 }
 
 impl Corner3 {
@@ -447,14 +447,14 @@ impl Corner3 {
     /// [`Corner3::X1Y0Z0`].
     pub fn flipped(self, axis: Axis3) -> Corner3 {
         match (self as u8) ^ (1 << axis as u8) {
-            0 => Self::X0Y0Z0,
-            1 => Self::X1Y0Z0,
-            2 => Self::X0Y1Z0,
-            3 => Self::X1Y1Z0,
-            4 => Self::X0Y0Z1,
-            5 => Self::X1Y0Z1,
-            6 => Self::X0Y1Z1,
-            7 => Self::X1Y1Z1,
+            0 => Self::Origin,
+            1 => Self::X,
+            2 => Self::Y,
+            3 => Self::XY,
+            4 => Self::Z,
+            5 => Self::XZ,
+            6 => Self::YZ,
+            7 => Self::XYZ,
             _ => unreachable!(), // should get optimized away
         }
     }
@@ -466,15 +466,15 @@ impl Corner3 {
     pub fn facing_along_axis(self, axis: Axis3) -> Facing3 {
         if (self as u8) & (1 << axis as u8) == 0 {
             match axis {
-                Axis3::X => Facing3::X0,
-                Axis3::Y => Facing3::Y0,
-                Axis3::Z => Facing3::Z0,
+                Axis3::X => Facing3::NegX,
+                Axis3::Y => Facing3::NegY,
+                Axis3::Z => Facing3::NegZ,
             }
         } else {
             match axis {
-                Axis3::X => Facing3::X1,
-                Axis3::Y => Facing3::Y1,
-                Axis3::Z => Facing3::Z1,
+                Axis3::X => Facing3::PosX,
+                Axis3::Y => Facing3::PosY,
+                Axis3::Z => Facing3::PosZ,
             }
         }
     }
@@ -508,7 +508,7 @@ impl Corner3 {
     pub fn is_even(self) -> bool {
         matches!(
             self,
-            Corner3::X0Y0Z0 | Corner3::X1Y1Z0 | Corner3::X0Y1Z1 | Corner3::X1Y0Z1
+            Corner3::Origin | Corner3::XY | Corner3::YZ | Corner3::XZ
         )
     }
 
@@ -525,14 +525,14 @@ impl Corner3 {
 
 impl_from_for_vec! {
     Corner3 for [Vec3, Vec3A, DVec3, IVec3, UVec3] {
-        X0Y0Z0 => (0, 0, 0),
-        X1Y0Z0 => (1, 0, 0),
-        X0Y1Z0 => (0, 1, 0),
-        X1Y1Z0 => (1, 1, 0),
-        X0Y0Z1 => (0, 0, 1),
-        X1Y0Z1 => (1, 0, 1),
-        X0Y1Z1 => (0, 1, 1),
-        X1Y1Z1 => (1, 1, 1),
+        Origin => (0, 0, 0),
+        X      => (1, 0, 0),
+        Y      => (0, 1, 0),
+        XY     => (1, 1, 0),
+        Z      => (0, 0, 1),
+        XZ     => (1, 0, 1),
+        YZ     => (0, 1, 1),
+        XYZ    => (1, 1, 1),
     }
 }
 
@@ -541,12 +541,12 @@ pub type Corners3 = EnumSet<Corner3>;
 impl From<Facing3> for Corners3 {
     fn from(value: Facing3) -> Self {
         match value {
-            Facing3::X0 => Corner3::X0Y0Z0 | Corner3::X0Y1Z0 | Corner3::X0Y0Z1 | Corner3::X0Y1Z1,
-            Facing3::X1 => Corner3::X1Y0Z0 | Corner3::X1Y1Z0 | Corner3::X1Y0Z1 | Corner3::X1Y1Z1,
-            Facing3::Y0 => Corner3::X0Y0Z0 | Corner3::X1Y0Z0 | Corner3::X0Y0Z1 | Corner3::X1Y0Z1,
-            Facing3::Y1 => Corner3::X0Y1Z0 | Corner3::X1Y1Z0 | Corner3::X0Y1Z1 | Corner3::X1Y1Z1,
-            Facing3::Z0 => Corner3::X0Y0Z0 | Corner3::X1Y0Z0 | Corner3::X0Y1Z0 | Corner3::X1Y1Z0,
-            Facing3::Z1 => Corner3::X0Y0Z1 | Corner3::X1Y0Z1 | Corner3::X0Y1Z1 | Corner3::X1Y1Z1,
+            Facing3::NegX => Corner3::Origin | Corner3::Y | Corner3::Z | Corner3::YZ,
+            Facing3::PosX => Corner3::X | Corner3::XY | Corner3::XZ | Corner3::XYZ,
+            Facing3::NegY => Corner3::Origin | Corner3::X | Corner3::Z | Corner3::XZ,
+            Facing3::PosY => Corner3::Y | Corner3::XY | Corner3::YZ | Corner3::XYZ,
+            Facing3::NegZ => Corner3::Origin | Corner3::X | Corner3::Y | Corner3::XY,
+            Facing3::PosZ => Corner3::Z | Corner3::XZ | Corner3::YZ | Corner3::XYZ,
         }
     }
 }
@@ -554,10 +554,10 @@ impl From<Facing3> for Corners3 {
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Edge2 {
-    X0,
-    X1,
-    Y0,
-    Y1,
+    X,
+    YX,
+    Y,
+    XY,
 }
 
 pub type Edges2 = EnumSet<Edge2>;
@@ -565,18 +565,18 @@ pub type Edges2 = EnumSet<Edge2>;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Enum, EnumSetType)]
 #[enumset(no_super_impls)]
 pub enum Edge3 {
-    X0Y0,
-    X1Y0,
-    X0Y1,
-    X1Y1,
-    Y0Z0,
-    Y1Z0,
-    Y0Z1,
-    Y1Z1,
-    X0Z1,
-    X1Z1,
-    X0Z0,
-    X1Z0,
+    X,
+    YX,
+    ZX,
+    YZX,
+    Y,
+    ZY,
+    XY,
+    ZXY,
+    Z,
+    XZ,
+    YZ,
+    XYZ,
 }
 
 pub type Edges3 = EnumSet<Edge3>;
