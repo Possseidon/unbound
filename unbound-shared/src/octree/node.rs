@@ -1,18 +1,15 @@
-use array_init::array_init;
-use itertools::Itertools;
+use bevy::math::UVec3;
 
 use super::{
     bounds::OctreeBounds,
-    visit::{
-        ChangeTracker, OctreeVisitor, OctreeVisitorMut, VisitSplit, VisitSplitMut, VisitValue,
-    },
+    visit::{OctreeVisitor, OctreeVisitorMut},
 };
-use crate::octree::bounds::OctreeBoundsSplit;
+use crate::change_tracking::Mut;
 
 /// A node within an octree, either holding a value or is split into more nodes.
 ///
-/// Nodes can be split in half, quarters or octants. Halfs and quarters can be used to store
-/// non-cube octrees efficiently.
+/// Nodes can be split in half, quarters or octants and with up to a total of 6 splits along any
+/// axis per [`Node`]. Note that octants require 3 splits, so only 2 can be stored at once.
 ///
 /// There is a hierarchy of which splits are allowed:
 ///
@@ -25,201 +22,120 @@ use crate::octree::bounds::OctreeBoundsSplit;
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum Node<T> {
     Value(T),
-    Halfs(Box<[Node<T>; 2]>),
-    Quarters(Box<[Node<T>; 4]>),
-    Octants(Box<[Node<T>; 8]>),
+    Values2(Box<[T; 2]>),
+    Values4(Box<[T; 4]>),
+    Values8(Box<[T; 8]>),
+    Values16(Box<[T; 16]>),
+    Values32(Box<[T; 32]>),
+    Values64(Box<[T; 64]>),
+    Split2(Box<[Node<T>; 2]>),
+    Split4(Box<[Node<T>; 4]>),
+    Split8(Box<[Node<T>; 8]>),
+    Split16(Box<[Node<T>; 16]>),
+    Split32(Box<[Node<T>; 32]>),
+    Split64(Box<[Node<T>; 64]>),
 }
 
 impl<T> Node<T> {
-    pub(crate) fn visit(&self, visitor: &mut impl OctreeVisitor<Value = T>, bounds: OctreeBounds) {
+    pub(crate) fn visit(
+        &self,
+        visitor: &mut impl OctreeVisitor<Value = T, Bounds = OctreeBounds>,
+        bounds: OctreeBounds,
+    ) {
         match self {
-            Self::Value(value) => visitor.visit_value(bounds, value),
-            Self::Halfs(nodes) => {
-                Self::visit_split(visitor, bounds, nodes, OctreeBounds::split_in_half)
-            }
-            Self::Quarters(nodes) => {
-                Self::visit_split(visitor, bounds, nodes, OctreeBounds::split_into_quarters)
-            }
-            Self::Octants(nodes) => {
-                Self::visit_split(visitor, bounds, nodes, OctreeBounds::split_into_octants)
-            }
+            Self::Value(value) => visitor.visit_bounds(bounds, value),
+            Self::Values2(values) => Self::visit_values(visitor, bounds, values),
+            Self::Values4(values) => Self::visit_values(visitor, bounds, values),
+            Self::Values8(values) => Self::visit_values(visitor, bounds, values),
+            Self::Values16(values) => Self::visit_values(visitor, bounds, values),
+            Self::Values32(values) => Self::visit_values(visitor, bounds, values),
+            Self::Values64(values) => Self::visit_values(visitor, bounds, values),
+            Self::Split2(nodes) => Self::visit_split(visitor, bounds, nodes),
+            Self::Split4(nodes) => Self::visit_split(visitor, bounds, nodes),
+            Self::Split8(nodes) => Self::visit_split(visitor, bounds, nodes),
+            Self::Split16(nodes) => Self::visit_split(visitor, bounds, nodes),
+            Self::Split32(nodes) => Self::visit_split(visitor, bounds, nodes),
+            Self::Split64(nodes) => Self::visit_split(visitor, bounds, nodes),
         }
+    }
+
+    fn visit_values<const N: usize>(
+        visitor: &mut impl OctreeVisitor<Value = T>,
+        bounds: OctreeBounds,
+        values: &[T; N],
+    ) {
+        // bounds.split()
     }
 
     fn visit_split<const N: usize>(
         visitor: &mut impl OctreeVisitor<Value = T>,
         bounds: OctreeBounds,
         nodes: &[Self; N],
-        split: fn(OctreeBounds) -> Option<[OctreeBounds; N]>,
     ) {
-        match visitor.visit_split(bounds) {
-            VisitSplit::Skip => {}
-            VisitSplit::Enter => {
-                let split_bounds = split(bounds).expect("bounds should split");
-                for (node, half) in nodes.as_slice().iter().zip_eq(split_bounds) {
-                    node.visit(visitor, half);
-                }
-            }
-        }
+        todo!()
     }
 
-    fn value_or_distinct(&self) -> Result<&T, Distinct> {
-        if let Node::Value(value) = self {
-            Ok(value)
-        } else {
-            Err(Distinct)
-        }
-    }
-
-    fn into_value(self) -> T {
-        if let Node::Value(value) = self {
-            value
-        } else {
-            panic!("node should contain a value")
-        }
-    }
-
-    fn replace_node(&mut self, node: SplitResult<T>) -> bool {
-        match node {
-            SplitResult::Keep { changed } => changed,
-            SplitResult::Merge(value) => {
-                *self = Self::Value(value);
-                true
-            }
-        }
-    }
-}
-
-impl<T: Clone + PartialEq> Node<T> {
     pub(crate) fn visit_mut(
         &mut self,
-        visitor: &mut impl OctreeVisitorMut<Value = T>,
+        visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
         bounds: OctreeBounds,
     ) -> bool {
-        match self {
-            Self::Value(value) => {
-                let mut change_tracker = ChangeTracker::new(value);
-                if let Some(point) = bounds.to_point() {
-                    visitor.visit_single_value_mut(point, &mut change_tracker);
-                    change_tracker.changed()
-                } else {
-                    let result = visitor.visit_value_mut(bounds, &mut change_tracker);
-                    let changed = change_tracker.changed();
-                    match result {
-                        VisitValue::Next => changed,
-                        VisitValue::Split => {
-                            let node = Self::new_split(visitor, bounds, value);
-                            // intentionally avoid short-circuiting
-                            if let Some(node) = node {
-                                *self = node;
-                                true
-                            } else {
-                                changed
-                            }
-                        }
-                    }
-                }
+        let result = match self {
+            Self::Value(value) => Self::visit_value_mut(visitor, bounds, value),
+            Self::Values2(values) => Self::visit_values_mut(visitor, bounds, values),
+            Self::Values4(values) => Self::visit_values_mut(visitor, bounds, values),
+            Self::Values8(values) => Self::visit_values_mut(visitor, bounds, values),
+            Self::Values16(values) => Self::visit_values_mut(visitor, bounds, values),
+            Self::Values32(values) => Self::visit_values_mut(visitor, bounds, values),
+            Self::Values64(values) => Self::visit_values_mut(visitor, bounds, values),
+            Self::Split2(nodes) => Self::visit_split_mut(visitor, bounds, nodes),
+            Self::Split4(nodes) => Self::visit_split_mut(visitor, bounds, nodes),
+            Self::Split8(nodes) => Self::visit_split_mut(visitor, bounds, nodes),
+            Self::Split16(nodes) => Self::visit_split_mut(visitor, bounds, nodes),
+            Self::Split32(nodes) => Self::visit_split_mut(visitor, bounds, nodes),
+            Self::Split64(nodes) => Self::visit_split_mut(visitor, bounds, nodes),
+        };
+        match result {
+            VisitMutResult::Replace(node) => {
+                *self = node;
+                true
             }
-            Self::Halfs(nodes) => {
-                let node =
-                    Self::visit_split_mut(visitor, bounds, nodes, OctreeBounds::split_in_half);
-                self.replace_node(node)
-            }
-            Self::Quarters(nodes) => {
-                let node = Self::visit_split_mut(
-                    visitor,
-                    bounds,
-                    nodes,
-                    OctreeBounds::split_into_quarters,
-                );
-                self.replace_node(node)
-            }
-            Self::Octants(nodes) => {
-                let node =
-                    Self::visit_split_mut(visitor, bounds, nodes, OctreeBounds::split_into_octants);
-                self.replace_node(node)
-            }
+            VisitMutResult::Changed(changed) => changed,
         }
     }
 
-    fn new_split(
+    fn visit_value_mut(
+        visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
+        bounds: OctreeBounds,
+        value: &mut T,
+    ) -> VisitMutResult<T> {
+        let mut value = Mut::new(value);
+        if let Some(pos) = bounds.to_point() {
+            visitor.visit_value_mut(pos, &mut value);
+            VisitMutResult::Changed(Mut::changed(&value))
+        } else if visitor.visit_bounds_mut(bounds, &mut value) {
+            // split it
+            // delegate to visit_split_mut
+            VisitMutResult::Replace(todo!())
+        } else {
+            VisitMutResult::Changed(Mut::changed(&value))
+        }
+    }
+
+    fn visit_values_mut<const N: usize>(
         visitor: &mut impl OctreeVisitorMut<Value = T>,
         bounds: OctreeBounds,
-        value: &T,
-    ) -> Option<Self> {
-        match bounds.split().expect("bounds should split") {
-            OctreeBoundsSplit::Half(bounds) => {
-                Self::new_split_for(visitor, bounds, value, Self::Halfs)
-            }
-            OctreeBoundsSplit::Quarter(bounds) => {
-                Self::new_split_for(visitor, bounds, value, Self::Quarters)
-            }
-            OctreeBoundsSplit::Octant(bounds) => {
-                Self::new_split_for(visitor, bounds, value, Self::Octants)
-            }
-        }
-    }
-
-    fn new_split_for<const N: usize>(
-        visitor: &mut impl OctreeVisitorMut<Value = T>,
-        bounds: [OctreeBounds; N],
-        value: &T,
-        wrap: fn(Box<[Self; N]>) -> Self,
-    ) -> Option<Self> {
-        let mut nodes = array_init(|_| Self::Value(value.clone()));
-        nodes
-            .iter_mut()
-            .zip_eq(bounds)
-            .fold(false, |current, (node, bounds)| {
-                // intentionally avoid short-circuiting
-                current | node.visit_mut(visitor, bounds)
-            })
-            .then(|| {
-                if nodes.iter().map(Self::value_or_distinct).all_equal() {
-                    Self::Value(
-                        nodes
-                            .into_iter()
-                            .next()
-                            .expect("nodes should not be empty")
-                            .into_value(),
-                    )
-                } else {
-                    wrap(Box::new(nodes))
-                }
-            })
+        values: &mut [T; N],
+    ) -> VisitMutResult<T> {
+        todo!()
     }
 
     fn visit_split_mut<const N: usize>(
         visitor: &mut impl OctreeVisitorMut<Value = T>,
         bounds: OctreeBounds,
-        nodes: &mut [Self; N],
-        split: fn(OctreeBounds) -> Option<[OctreeBounds; N]>,
-    ) -> SplitResult<T> {
-        match visitor.visit_split_mut(bounds) {
-            VisitSplitMut::Skip => SplitResult::Keep { changed: false },
-            VisitSplitMut::Enter => {
-                let split_bounds = split(bounds).expect("bounds should split");
-                let changed = nodes.as_mut_slice().iter_mut().zip_eq(split_bounds).fold(
-                    false,
-                    |current, (node, half)| {
-                        // intentionally avoid short-circuiting
-                        current | node.visit_mut(visitor, half)
-                    },
-                );
-
-                if changed && nodes.iter().map(Self::value_or_distinct).all_equal() {
-                    // this clone could in theory be avoided, but...
-                    // that would require unwrapping the box upfront
-                    // -> which would require unnecessary allocations when repacking
-                    // or it would require some wrangling with the replace_with crate
-                    // -> which would probably require a lot of function inlining and duplication
-                    SplitResult::Merge(nodes[0].clone().into_value())
-                } else {
-                    SplitResult::Keep { changed }
-                }
-            }
-            VisitSplitMut::Fill(value) => SplitResult::Merge(value),
-        }
+        nodes: &[Node<T>; N],
+    ) -> VisitMutResult<T> {
+        todo!()
     }
 }
 
@@ -242,4 +158,9 @@ impl PartialEq for Distinct {
 enum SplitResult<T> {
     Keep { changed: bool },
     Merge(T),
+}
+
+enum VisitMutResult<T> {
+    Replace(Node<T>),
+    Changed(bool),
 }

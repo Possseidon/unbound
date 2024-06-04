@@ -1,6 +1,6 @@
 use bevy::math::UVec3;
 
-use super::extent::{OctreeExtent, OctreeSplit};
+use super::extent::OctreeExtent;
 
 /// The location of a node within an octree.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -8,7 +8,7 @@ pub struct OctreeBounds {
     /// The position within the octree where the bounds start.
     ///
     /// Must be a multiple of [`Self::extent`] and at most [`i32::MAX`].
-    offset: UVec3,
+    pos: UVec3,
     /// The extent of the bounds.
     extent: OctreeExtent,
 }
@@ -16,111 +16,48 @@ pub struct OctreeBounds {
 impl OctreeBounds {
     pub const fn from_extent(extent: OctreeExtent) -> Self {
         Self {
-            offset: UVec3::ZERO,
+            pos: UVec3::ZERO,
             extent,
         }
     }
 
     pub const fn from_point(pos: UVec3) -> Self {
         Self {
-            offset: pos,
+            pos,
             extent: OctreeExtent::ONE,
         }
     }
 
     pub const fn to_point(self) -> Option<UVec3> {
         if let OctreeExtent::ONE = self.extent {
-            Some(self.offset)
+            Some(self.pos)
         } else {
             None
         }
     }
 
-    pub const fn offset(self) -> UVec3 {
-        self.offset
+    pub const fn pos(self) -> UVec3 {
+        self.pos
     }
 
     pub const fn extent(self) -> OctreeExtent {
         self.extent
     }
 
-    pub fn split(self) -> Option<OctreeBoundsSplit> {
-        Some(match self.extent.next_split()? {
-            OctreeSplit::Half => {
-                OctreeBoundsSplit::Half(self.split_in_half().expect("bounds should split in half"))
-            }
-            OctreeSplit::Quarter => OctreeBoundsSplit::Quarter(
-                self.split_into_quarters()
-                    .expect("bounds should split into quarters"),
-            ),
-            OctreeSplit::Octant => OctreeBoundsSplit::Octant(
-                self.split_into_octants()
-                    .expect("bounds should split into octants"),
-            ),
-        })
-    }
-
-    /// Splits the bounds in half along the longest axis.
+    /// Returns up to 6 splits (64 sub-bounds) in Z-order.
     ///
-    /// Returns [`None`] if there are multiple longest axes.
+    /// Positions of each split are yielded by the [`OctreeBoundsSplit`] iterator. The extent of the
+    /// sub-bounds is returned separate, since it is the same for all.
     ///
-    /// The half with the original offset is returned first.
-    pub fn split_in_half(self) -> Option<[Self; 2]> {
-        let (extent, halfed) = self.extent.half_longest()?;
-        (halfed.bitmask().count_ones() == 1).then_some([
-            self.with_extent_and_offset(extent, UVec3::ZERO),
-            self.with_extent_and_offset(extent, UVec3::select(halfed, extent.size(), UVec3::ZERO)),
-        ])
-    }
-
-    /// Splits the bounds in quarters along the longest two axes.
+    /// Having position and extent split like this also avoids having to unnecessarly convert to
+    /// positions to [`OctreeOffset`]s.
     ///
-    /// Returns [`None`] if there aren't exactly two longest axes.
-    ///
-    /// The returned quarters are ordered lexicographically by their X, Y and finally Z offset
-    /// (one of which is skipped, since all quarters share one of the three axes).
-    pub fn split_into_quarters(self) -> Option<[Self; 4]> {
-        let (extent, halfed) = self.extent.half_longest()?;
-        let (a, b) = match halfed.bitmask() {
-            0b011 => (UVec3::X, UVec3::Y),
-            0b101 => (UVec3::X, UVec3::Z),
-            0b110 => (UVec3::Y, UVec3::Z),
-            _ => return None,
-        };
-
-        Some([
-            self.with_extent_and_offset(extent, UVec3::ZERO),
-            self.with_extent_and_offset(extent, a),
-            self.with_extent_and_offset(extent, b),
-            self.with_extent_and_offset(extent, a + b),
-        ])
-    }
-
-    /// Splits the bounds in octants.
-    ///
-    /// Returns [`None`] if any axis has a different length or if the extent is
-    /// [`OctreeExtent::ONE`].
-    ///
-    /// The returned octants are ordered lexicographically by their X, Y and finally Z offset.
-    pub fn split_into_octants(self) -> Option<[Self; 8]> {
-        let (extent, halfed) = self.extent.half_longest()?;
-        halfed.all().then_some([
-            self.with_extent_and_offset(extent, UVec3::ZERO),
-            self.with_extent_and_offset(extent, UVec3::X),
-            self.with_extent_and_offset(extent, UVec3::Y),
-            self.with_extent_and_offset(extent, UVec3::Z),
-            self.with_extent_and_offset(extent, UVec3::X + UVec3::Y),
-            self.with_extent_and_offset(extent, UVec3::X + UVec3::Z),
-            self.with_extent_and_offset(extent, UVec3::Y + UVec3::Z),
-            self.with_extent_and_offset(extent, UVec3::ONE),
-        ])
-    }
-
-    pub(crate) fn with_extent_and_offset(self, extent: OctreeExtent, offset: UVec3) -> Self {
-        Self {
-            offset: self.offset + offset,
-            extent,
-        }
+    /// See [`OctreeExtent::split_towards_cube`] for more info on splitting.
+    pub fn split(self, splits: [u8; 3]) -> (OctreeBoundsSplit, OctreeExtent) {
+        todo!()
+        // let extent: OctreeExtent = todo!("calculate from self and splits");
+        // let split = OctreeBoundsSplit::new(self.pos, extent.size_log2(), splits);
+        // (split, extent)
     }
 }
 
@@ -131,8 +68,67 @@ impl From<OctreeExtent> for OctreeBounds {
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub enum OctreeBoundsSplit {
-    Half([OctreeBounds; 2]),
-    Quarter([OctreeBounds; 4]),
-    Octant([OctreeBounds; 8]),
+pub struct OctreeBoundsSplit {
+    /// The origin (point with smallest x, y and z) of the outer bounds that are to be split.
+    origin: UVec3,
+    /// The extent of the inner bounds that are yielded.
+    extent: OctreeExtent,
+    /// The number of splits along the x axis.
+    x_splits: u8,
+    /// The number of splits along the y axis.
+    y_splits: u8,
+    /// The current position of the iterator.
+    index: u8,
+    /// Marks the end of iteration.
+    end: u8,
+}
+
+impl OctreeBoundsSplit {
+    fn new(origin: UVec3, extent: OctreeExtent, splits: [u8; 3]) -> Self {
+        let total_splits = splits[0] + splits[1] + splits[2];
+        // limited to 7; only up to 6 splits are actually used
+        assert!(total_splits < 8);
+        Self {
+            origin,
+            extent,
+            x_splits: splits[0],
+            y_splits: splits[1],
+            index: 0,
+            end: 1 << total_splits,
+        }
+    }
+
+    /// Unpacks a compact index into a [`UVec3`].
+    fn unpack_index(mut self) -> [u8; 3] {
+        let x = self.index & ((1 << self.x_splits) - 1);
+        self.index >>= self.x_splits;
+        let y = self.index & ((1 << self.y_splits) - 1);
+        self.index >>= self.y_splits;
+        let z = self.index;
+        [x, y, z]
+    }
+}
+
+impl Iterator for OctreeBoundsSplit {
+    type Item = UVec3;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.end {
+            return None;
+        }
+
+        let [x, y, z] = self.unpack_index();
+
+        // increment after unpacking
+        self.index += 1;
+
+        let size_log2 = self.extent.size_log2();
+        let offset = UVec3::new(
+            u32::from(x) << size_log2[0],
+            u32::from(y) << size_log2[1],
+            u32::from(z) << size_log2[2],
+        );
+
+        Some(self.origin + offset)
+    }
 }
