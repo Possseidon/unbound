@@ -1,6 +1,6 @@
-use bevy::math::UVec3;
+use glam::UVec3;
 
-use super::extent::OctreeExtent;
+use super::extent::{OctreeExtent, OctreeSplits};
 
 /// The location of a node within an octree.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -49,15 +49,9 @@ impl OctreeBounds {
     /// Positions of each split are yielded by the [`OctreeBoundsSplit`] iterator. The extent of the
     /// sub-bounds is returned separate, since it is the same for all.
     ///
-    /// Having position and extent split like this also avoids having to unnecessarly convert to
-    /// positions to [`OctreeOffset`]s.
-    ///
     /// See [`OctreeExtent::split_towards_cube`] for more info on splitting.
-    pub fn split(self, splits: [u8; 3]) -> (OctreeBoundsSplit, OctreeExtent) {
-        todo!()
-        // let extent: OctreeExtent = todo!("calculate from self and splits");
-        // let split = OctreeBoundsSplit::new(self.pos, extent.size_log2(), splits);
-        // (split, extent)
+    pub fn split(self, splits: OctreeSplits) -> OctreeBoundsSplit {
+        OctreeBoundsSplit::new(self.pos, self.extent.split(splits), splits)
     }
 }
 
@@ -84,15 +78,15 @@ pub struct OctreeBoundsSplit {
 }
 
 impl OctreeBoundsSplit {
-    fn new(origin: UVec3, extent: OctreeExtent, splits: [u8; 3]) -> Self {
-        let total_splits = splits[0] + splits[1] + splits[2];
+    fn new(origin: UVec3, extent: OctreeExtent, splits: OctreeSplits) -> Self {
+        let total_splits = splits.total();
         // limited to 7; only up to 6 splits are actually used
         assert!(total_splits < 8);
         Self {
             origin,
             extent,
-            x_splits: splits[0],
-            y_splits: splits[1],
+            x_splits: splits.x(),
+            y_splits: splits.y(),
             index: 0,
             end: 1 << total_splits,
         }

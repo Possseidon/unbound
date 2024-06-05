@@ -5,7 +5,9 @@ mod node;
 pub mod set;
 pub mod visit;
 
-use extent::OctreeExtent;
+use bounds::OctreeBounds;
+use extent::{OctreeExtent, OctreeSplitBuffer};
+use glam::UVec3;
 use node::Node;
 use visit::{OctreeVisitor, OctreeVisitorMut};
 
@@ -38,21 +40,25 @@ impl<T> Octree<T> {
     /// Traverses the [`Octree`] with the given `visitor`.
     ///
     /// This is the base-primitive for all immutable [`Octree`] operations.
-    pub fn visit(&self, visitor: &mut impl OctreeVisitor<Value = T>) {
-        // let layers = [OctreeExtent::ONE; 15];
-        // let layers = self.extent.to_splits(&mut layers);
-        // self.root.visit(visitor, layers)
+    pub fn visit(&self, visitor: &mut impl OctreeVisitor<Value = T, Bounds = OctreeBounds>) {
+        let mut buffer = OctreeSplitBuffer::EMPTY;
+        let splits = self.extent.to_splits(&mut buffer);
+        self.root.visit(visitor, self.extent.into(), splits)
     }
 
     /// Traverses the [`Octree`] with the given `visitor` and returns `true` if it was modified.
     ///
     /// This is the base-primitive for all mutable [`Octree`] operations.
-    pub fn visit_mut(&mut self, visitor: &mut impl OctreeVisitorMut<Value = T>) -> bool
+    pub fn visit_mut(
+        &mut self,
+        visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
+    ) -> bool
     where
         T: Clone + PartialEq,
     {
-        // self.root.visit_mut(visitor, self.extent.into())
-        todo!()
+        let mut buffer = OctreeSplitBuffer::EMPTY;
+        let splits = self.extent.to_splits(&mut buffer);
+        self.root.visit_mut(visitor, self.extent.into(), splits)
     }
 }
 

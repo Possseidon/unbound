@@ -1,4 +1,4 @@
-use bevy::math::UVec3;
+use glam::UVec3;
 
 /// The extent of an octree, i.e. how often it can be split along the different axes.
 ///
@@ -77,92 +77,60 @@ impl OctreeExtent {
         )
     }
 
-    /// Splits the [`OctreeExtent`] towards a cube.
-    ///
-    /// Returns two things:
-    ///
-    /// 1. The split extent
-    /// 2. How many of these split extents would fit in the original extent
-    ///
-    /// The total number of splits can be limited by `max_splits`. Splits along multiple axes at the
-    /// same time also count multiple times towards this limit.
-    ///
-    /// Additionally, splits only occur on all of the longest axes simultaneously, which results in
-    /// the "split towards a cube" behavior. If a cube _can_ be reached, the result _will_ be a
-    /// cube, even if `max_splits` was not yet reached.
-    ///
-    /// This also means, that if `max_splits` is less than `3`, this function will not be able to
-    /// split cubes at all, since that requires at least `3` simultaneous splits.
-    pub fn split_towards_cube(mut self, mut max_splits: u8) -> (Self, [u8; 3]) {
-        let mut splits = [0; 3];
-        loop {
-            let size_log2 = self.size_log2();
-            if size_log2 == [0; 3] {
-                break;
-            }
-            let max_size_log2 = size_log2[0].max(size_log2[1]).max(size_log2[2]);
-            let x = size_log2[0] == max_size_log2;
-            let y = size_log2[1] == max_size_log2;
-            let z = size_log2[2] == max_size_log2;
-            let new_splits = u8::from(x) + u8::from(y) + u8::from(z);
-            let Some(remaining_splits) = max_splits.checked_sub(new_splits) else {
-                break;
-            };
-            max_splits = remaining_splits;
-            if x {
-                splits[0] += 1;
-                self.size_log2[0] -= 1;
-            }
-            if y {
-                splits[1] += 1;
-                self.size_log2[1] -= 1;
-            }
-            if z {
-                splits[2] += 1;
-                self.size_log2[2] -= 1;
-            }
-        }
-        (self, splits)
-    }
-
     /// Calculates the optimal splits for an octree.
     ///
     /// The outermost split will be the last item in the returned slice.
     ///
     /// A single entry will only split up to 6 times combined throughout all axes.
-    pub(crate) fn to_splits(self, splits: &mut [[u8; 3]; 15]) -> &[[u8; 3]] {
+    pub fn to_splits(self, buffer: &mut OctreeSplitBuffer) -> &[OctreeSplits] {
         let mut index = 0;
-
-        let mut rest = self.size_log2;
-
-        let mut split = [0; 3];
+        let mut remaining_splits = self.size_log2;
+        let mut current = OctreeSplits::NONE;
 
         const SPLITS_PER_LAYER: u8 = 6;
-        let mut remaining_splits = SPLITS_PER_LAYER;
+        let mut remaining_splits_for_layer = SPLITS_PER_LAYER;
 
-        while rest != [0; 3] {
-            for i in 0..3 {
-                if let Some(value) = rest[i].checked_sub(1) {
-                    rest[i] = value;
-                    split[i] += 1;
-                    remaining_splits -= 1;
+        while remaining_splits != [0; 3] {
+            for (i, remaining_split) in remaining_splits.iter_mut().enumerate() {
+                if let Some(value) = remaining_split.checked_sub(1) {
+                    *remaining_split = value;
+                    current.splits[i] += 1;
+                    remaining_splits_for_layer -= 1;
 
-                    if remaining_splits == 0 {
-                        splits[index] = split;
+                    if remaining_splits_for_layer == 0 {
+                        buffer.levels[index] = current;
                         index += 1;
-                        remaining_splits = SPLITS_PER_LAYER;
-                        split = [0; 3];
+                        remaining_splits_for_layer = SPLITS_PER_LAYER;
+                        current = OctreeSplits::NONE;
                     }
                 }
             }
         }
 
-        if split != [0; 3] {
-            splits[index] = split;
+        if current != OctreeSplits::NONE {
+            buffer.levels[index] = current;
             index += 1;
         }
 
-        &splits[0..index]
+        &buffer.levels[0..index]
+    }
+
+    /// Splits the [`OctreeExtent`] `splits` times along the corresponding axes.
+    ///
+    /// Use [`OctreeExtent::to_splits`] to calculate the optimal splits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`OctreeExtent`] cannot be split `splits` times.
+    pub fn split(self, splits: OctreeSplits) -> Self {
+        const MSG: &str = "extent should be splittable";
+        Self {
+            size_log2: [
+                self.size_log2[0].checked_sub(splits.splits[0]).expect(MSG),
+                self.size_log2[1].checked_sub(splits.splits[1]).expect(MSG),
+                self.size_log2[2].checked_sub(splits.splits[2]).expect(MSG),
+            ],
+        }
     }
 }
 
@@ -170,12 +138,55 @@ impl From<OctreeExtentCompact> for OctreeExtent {
     fn from(value: OctreeExtentCompact) -> Self {
         Self {
             size_log2: [
-                (value.size_log2 & 0x1F) as u8,
-                (value.size_log2 >> 5 & 0x1F) as u8,
                 (value.size_log2 >> 10 & 0x1F) as u8,
+                (value.size_log2 >> 5 & 0x1F) as u8,
+                (value.size_log2 & 0x1F) as u8,
             ],
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub struct OctreeSplits {
+    splits: [u8; 3],
+}
+
+impl OctreeSplits {
+    const NONE: Self = Self { splits: [0; 3] };
+
+    pub fn total(&self) -> u8 {
+        self.splits[0] + self.splits[1] + self.splits[2]
+    }
+
+    pub fn x(&self) -> u8 {
+        self.splits[0]
+    }
+
+    pub fn y(&self) -> u8 {
+        self.splits[1]
+    }
+
+    pub fn z(&self) -> u8 {
+        self.splits[2]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub struct OctreeSplitBuffer {
+    levels: [OctreeSplits; OctreeSplitBuffer::MAX_SPLITS],
+}
+
+impl OctreeSplitBuffer {
+    /// The maximum number of splits that can be stored in this buffer.
+    ///
+    /// This is also the maximum number of splits that are possible in total for an
+    /// [`OctreeExtent::MAX`].
+    pub const MAX_SPLITS: usize = 16;
+
+    /// An empty [`OctreeSplitBuffer`] for use with [`OctreeExtent::to_splits`].
+    pub const EMPTY: Self = Self {
+        levels: [OctreeSplits::NONE; Self::MAX_SPLITS],
+    };
 }
 
 /// A compact version of [`OctreeExtent`].
@@ -193,9 +204,9 @@ pub struct OctreeExtentCompact {
 impl From<OctreeExtent> for OctreeExtentCompact {
     fn from(value: OctreeExtent) -> Self {
         Self {
-            size_log2: (value.size_log2[0] as u16)
+            size_log2: (value.size_log2[0] as u16) << 10
                 | (value.size_log2[1] as u16) << 5
-                | (value.size_log2[2] as u16) << 10,
+                | (value.size_log2[2] as u16),
         }
     }
 }
@@ -213,11 +224,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dummy() {
-        let mut splits = [[0; 3]; 15];
-        let splits = OctreeExtent::from_size_log2([10, 5, 4])
+    fn octree_extent_to_splits() {
+        let mut buffer = OctreeSplitBuffer::EMPTY;
+        let splits = OctreeExtent::from_size_log2([5, 10, 4])
             .unwrap()
-            .to_splits(&mut splits);
-        assert_eq!(splits, &[[2; 3], [2; 3], [5, 1, 0], [1, 0, 0]]);
+            .to_splits(&mut buffer);
+
+        let mut iter = splits.iter();
+        assert_eq!(iter.next(), Some(&OctreeSplits { splits: [2, 2, 2] }));
+        assert_eq!(iter.next(), Some(&OctreeSplits { splits: [2, 2, 2] }));
+        assert_eq!(iter.next(), Some(&OctreeSplits { splits: [1, 5, 0] }));
+        assert_eq!(iter.next(), Some(&OctreeSplits { splits: [0, 1, 0] }));
+        assert_eq!(iter.next(), None);
     }
 }

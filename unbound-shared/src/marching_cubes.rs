@@ -2,7 +2,7 @@ use std::iter;
 
 use array_init::array_init;
 use arrayvec::ArrayVec;
-use bevy::math::{IVec3, Vec3};
+use glam::{IVec3, Vec3};
 use itertools::Itertools;
 
 use crate::math_enums::{Axis3, Corner3, Corners3, Facing3, Facings3};

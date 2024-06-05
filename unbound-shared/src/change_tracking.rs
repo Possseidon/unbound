@@ -40,7 +40,7 @@ impl<'a, T> Mut<'a, T> {
         }
     }
 
-    /// Updates the value that was passed to [`Self::new`] while keeping track of changes.
+    /// Fully replaces the value with the given one.
     ///
     /// This stores the original value internally, which allows for [`Self::set`] to be called
     /// multiple times while still knowing if the value is different from the original.

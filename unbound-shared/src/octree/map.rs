@@ -1,4 +1,4 @@
-use bevy::math::{IVec3, UVec3};
+use glam::{IVec3, UVec3};
 
 use super::{extent::OctreeExtent, Octree};
 
@@ -17,13 +17,22 @@ pub struct OctreeMap<T> {
     min: IVec3,
     /// The maximum position that can be stored (inclusive).
     max: IVec3,
+    /// The first valid value in the [`Self::octree`].
+    ///
+    /// Can be used to freely change not only [`Self::max`] but also [`Self::min`] while keeping
+    /// without having to modify the underlying [`Octree`].
+    offset: UVec3,
 }
 
 impl<T> OctreeMap<T> {
     pub fn new(value: T, min: IVec3, max: IVec3) -> Option<Self> {
         if min.cmple(max).all() {
-            let octree = Octree::new(value, OctreeExtent::from_size(size_from_min_max(min, max))?);
-            Some(Self { octree, min, max })
+            Some(Self {
+                octree: Octree::new(value, OctreeExtent::from_size(size_from_min_max(min, max))?),
+                min,
+                max,
+                offset: UVec3::ZERO,
+            })
         } else {
             None
         }
@@ -39,6 +48,22 @@ impl<T> OctreeMap<T> {
 
     pub fn size(&self) -> UVec3 {
         size_from_min_max(self.min, self.max)
+    }
+
+    /// Transforms an [`OctreeMap`] position to the corresponding [`Octree`] position.
+    fn map_to_octree(&self, pos: IVec3) -> UVec3 {
+        // TODO: check if this overflows correctly; can it even overflow?
+        pos.wrapping_sub(self.min)
+            .as_uvec3()
+            .wrapping_sub(self.offset)
+    }
+
+    /// Transforms an [`Octree`] position to the corresponding [`OctreeMap`] position.
+    fn octree_to_map(&self, pos: UVec3) -> IVec3 {
+        // TODO: check if this overflows correctly; can it even overflow?
+        pos.wrapping_add(self.offset)
+            .as_ivec3()
+            .wrapping_add(self.min)
     }
 }
 

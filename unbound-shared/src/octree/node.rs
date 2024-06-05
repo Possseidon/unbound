@@ -1,7 +1,8 @@
-use bevy::math::UVec3;
+use glam::UVec3;
 
 use super::{
     bounds::OctreeBounds,
+    extent::OctreeSplits,
     visit::{OctreeVisitor, OctreeVisitorMut},
 };
 use crate::change_tracking::Mut;
@@ -41,6 +42,7 @@ impl<T> Node<T> {
         &self,
         visitor: &mut impl OctreeVisitor<Value = T, Bounds = OctreeBounds>,
         bounds: OctreeBounds,
+        splits: &[OctreeSplits],
     ) {
         match self {
             Self::Value(value) => visitor.visit_bounds(bounds, value),
@@ -79,6 +81,7 @@ impl<T> Node<T> {
         &mut self,
         visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
         bounds: OctreeBounds,
+        splits: &[OctreeSplits],
     ) -> bool {
         let result = match self {
             Self::Value(value) => Self::visit_value_mut(visitor, bounds, value),
