@@ -1,4 +1,4 @@
-use glam::UVec3;
+use glam::{uvec3, UVec3};
 
 use super::extent::{OctreeExtent, OctreeSplits};
 
@@ -117,7 +117,7 @@ impl Iterator for OctreeBoundsSplit {
         self.index += 1;
 
         let size_log2 = self.extent.size_log2();
-        let offset = UVec3::new(
+        let offset = uvec3(
             u32::from(x) << size_log2[0],
             u32::from(y) << size_log2[1],
             u32::from(z) << size_log2[2],

@@ -1,6 +1,7 @@
-use glam::{IVec3, UVec3};
+use glam::UVec3;
 
 use super::{extent::OctreeExtent, Octree};
+use crate::bounds::IBounds3;
 
 /// A map from [`IVec3`] to values of type `T` stored as an [`Octree`].
 ///
@@ -13,67 +14,22 @@ use super::{extent::OctreeExtent, Octree};
 pub struct OctreeMap<T> {
     /// The underlying power-of-two octree that stores the values.
     octree: Octree<T>,
-    /// The minimum position that can be stored (inclusive).
-    min: IVec3,
-    /// The maximum position that can be stored (inclusive).
-    max: IVec3,
-    /// The first valid value in the [`Self::octree`].
-    ///
-    /// Can be used to freely change not only [`Self::max`] but also [`Self::min`] while keeping
-    /// without having to modify the underlying [`Octree`].
-    offset: UVec3,
+    /// The range of positions that this [`OctreeMap`] covers.
+    bounds: IBounds3,
+    /// The origin of [`Self::bounds`] within [`Self::octree`].
+    origin: UVec3,
 }
 
 impl<T> OctreeMap<T> {
-    pub fn new(value: T, min: IVec3, max: IVec3) -> Option<Self> {
-        if min.cmple(max).all() {
-            Some(Self {
-                octree: Octree::new(value, OctreeExtent::from_size(size_from_min_max(min, max))?),
-                min,
-                max,
-                offset: UVec3::ZERO,
-            })
-        } else {
-            None
-        }
+    pub fn new(value: T, bounds: IBounds3) -> Option<Self> {
+        Some(Self {
+            octree: Octree::new(value, OctreeExtent::from_size(bounds.extent())?),
+            bounds,
+            origin: UVec3::ZERO,
+        })
     }
 
-    pub fn min(&self) -> IVec3 {
-        self.min
+    pub const fn bounds(&self) -> IBounds3 {
+        self.bounds
     }
-
-    pub fn max(&self) -> IVec3 {
-        self.max
-    }
-
-    pub fn size(&self) -> UVec3 {
-        size_from_min_max(self.min, self.max)
-    }
-
-    /// Transforms an [`OctreeMap`] position to the corresponding [`Octree`] position.
-    fn map_to_octree(&self, pos: IVec3) -> UVec3 {
-        // TODO: check if this overflows correctly; can it even overflow?
-        pos.wrapping_sub(self.min)
-            .as_uvec3()
-            .wrapping_sub(self.offset)
-    }
-
-    /// Transforms an [`Octree`] position to the corresponding [`OctreeMap`] position.
-    fn octree_to_map(&self, pos: UVec3) -> IVec3 {
-        // TODO: check if this overflows correctly; can it even overflow?
-        pos.wrapping_add(self.offset)
-            .as_ivec3()
-            .wrapping_add(self.min)
-    }
-}
-
-/// Returns the size of the given inclusive `min` and `max` range as an [`UVec3`].
-///
-/// # Panics
-///
-/// Panics if `min > max`.
-fn size_from_min_max(min: IVec3, max: IVec3) -> UVec3 {
-    assert!(min.cmple(max).all());
-    // signed wrap-around around for very large sizes, but the cast to `u32` fixes it
-    max.wrapping_sub(min).as_uvec3() + 1
 }

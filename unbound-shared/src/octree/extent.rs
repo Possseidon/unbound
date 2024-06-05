@@ -1,4 +1,4 @@
-use glam::UVec3;
+use glam::{uvec3, UVec3};
 
 /// The extent of an octree, i.e. how often it can be split along the different axes.
 ///
@@ -70,7 +70,7 @@ impl OctreeExtent {
 
     /// Returns the width, height and depth of this [`OctreeExtent`].
     pub const fn size(self) -> UVec3 {
-        UVec3::new(
+        uvec3(
             1 << self.size_log2[0],
             1 << self.size_log2[1],
             1 << self.size_log2[2],
