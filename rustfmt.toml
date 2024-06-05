@@ -1,0 +1,10 @@
+# make some rules that were previously preserved more strict; mostly requires nightly
+
+comment_width = 100
+format_code_in_doc_comments = true
+format_macro_matchers = true
+group_imports = "StdExternalCrate"
+hex_literal_case = "Upper"
+imports_granularity = "Crate"
+use_field_init_shorthand = true
+wrap_comments = true
