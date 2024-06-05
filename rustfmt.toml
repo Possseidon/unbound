@@ -6,5 +6,6 @@ format_macro_matchers = true
 group_imports = "StdExternalCrate"
 hex_literal_case = "Upper"
 imports_granularity = "Crate"
+unstable_features = true
 use_field_init_shorthand = true
 wrap_comments = true
