@@ -1,4 +1,4 @@
-use std::iter;
+use std::{cmp::Ordering, hash::Hash, iter};
 
 use array_init::array_init;
 use arrayvec::ArrayVec;
@@ -9,23 +9,14 @@ use crate::math::enums::{Axis3, Corner3, Corners3, Facing3, Facings3};
 
 /// Contains generated lookup information for building 3D meshes using a marching cubes algorithm.
 ///
-/// Does not implement [`Eq`], [`Hash`] and similar, since all instances are always the same. This
-/// could have very well also be exposed via a single static instance, however to avoid the slight
-/// memory overhead of always having that around, the lifetime is instead shifted to the user.
-///
 /// Keep in mind, that this type takes up **5KiB** on the stack, as it is fully stack-allocated.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq)]
 pub struct MarchingCubes {
     lookup: Lookup,
 }
 
 impl MarchingCubes {
     /// Generates the lookup table.
-    ///
-    /// This is not called `new` to signify that this isn't cheap (it is still pretty fast though).
-    ///
-    /// Not calling it `new` also avoids a clippy lint of not implementing the `Default` trait,
-    /// which is intentionally not implemented for the same reason.
     pub fn generate() -> Self {
         Self {
             lookup: generate_corner_planes(),
@@ -42,6 +33,34 @@ impl MarchingCubes {
     }
 }
 
+impl Default for MarchingCubes {
+    fn default() -> Self {
+        Self::generate()
+    }
+}
+
+impl Hash for MarchingCubes {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
+}
+
+impl PartialEq for MarchingCubes {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl PartialOrd for MarchingCubes {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MarchingCubes {
+    fn cmp(&self, _other: &Self) -> Ordering {
+        Ordering::Equal
+    }
+}
+
 /// The planes that divide a 3D cube into separate volumes.
 ///
 /// The underlying marching cubes algorithm guarantees, that there are at most 5 dividing planes.
@@ -55,11 +74,17 @@ pub type Plane = [PlanePoint; 3];
 /// The most straightforward way to turn a [`PlanePoint`] into an actual 3D position is to use the
 /// [`From`] trait to convert it into a [`Vec3`].
 ///
-/// Alternatively, [`PlanePoint::with_density(density: f32)`] allows you to shift the plane relative
-/// to the solid points that were used to generate this plane. The [`From`] trait simply uses a
-/// density of `0.5`.
+/// Alternatively, [`PlanePoint::with_density`] allows you to shift the plane relative to the solid
+/// points that were used to generate this plane. The [`From`] trait simply uses a density of `0.5`.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PlanePoint {
+    /// Stores both corner and facing information.
+    ///
+    /// From least to most significant bits:
+    ///
+    /// - 3 bits for [`Self::corner`]
+    /// - 3 bits for [`Self::facing`]
+    /// - 2 bits that are unused and always zero
     corner_facing: u8,
 }
 
@@ -111,8 +136,8 @@ impl PlanePoint {
     ///
     /// If you always use `0.5` the resulting mesh will basically have an angle of 45° between
     /// planes, which is expected from a conventional marching cubes algorithm. However, by using
-    /// varying densities (in a similar fashion to how anti-aliasing of raster images works) allows
-    /// for less steep angles and an overall smoother mesh.
+    /// varying densities (e.g. by doing something similar to how anti-aliasing works for raster
+    /// images) allows for less steep angles and an overall smoother mesh.
     pub fn with_density(self, density: f32) -> Vec3 {
         Vec3::from(self.corner()) + Vec3::from(self.facing()) * density
     }
