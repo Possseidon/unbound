@@ -9,7 +9,7 @@ use std::{
 use bitvec::{bitarr, field::BitField, order::Lsb0, BitArr};
 use enum_map::Enum;
 
-use crate::math_enums::Corner3;
+use crate::math::enums::Corner3;
 
 /// Identifies a single octant within an octree represented as a list of [`Corner3`].
 ///

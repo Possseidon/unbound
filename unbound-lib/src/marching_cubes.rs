@@ -5,7 +5,7 @@ use arrayvec::ArrayVec;
 use glam::{IVec3, Vec3};
 use itertools::Itertools;
 
-use crate::math_enums::{Axis3, Corner3, Corners3, Facing3, Facings3};
+use crate::math::enums::{Axis3, Corner3, Corners3, Facing3, Facings3};
 
 /// Contains generated lookup information for building 3D meshes using a marching cubes algorithm.
 ///

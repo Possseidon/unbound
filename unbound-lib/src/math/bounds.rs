@@ -33,7 +33,7 @@ impl IBounds3 {
     ///
     /// ```
     /// # use glam::{ivec3, uvec3, IVec3};
-    /// # use unbound_lib::bounds::IBounds3;
+    /// # use unbound_lib::math::bounds::IBounds3;
     /// let min = ivec3(-1, -1, -1);
     /// let max = ivec3(1, 1, 1);
     /// let bounds = IBounds3::new(min, max).unwrap();
@@ -64,7 +64,7 @@ impl IBounds3 {
     ///
     /// ```
     /// # use glam::{ivec3, uvec3};
-    /// # use unbound_lib::bounds::IBounds3;
+    /// # use unbound_lib::math::bounds::IBounds3;
     /// let point = ivec3(1, 2, 3);
     /// let bounds = IBounds3::from_point(point);
     /// assert!(bounds.contains(point));

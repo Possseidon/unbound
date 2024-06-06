@@ -74,7 +74,7 @@ mod tests {
     use octant::OctreeDepth;
 
     use super::*;
-    use crate::math_enums::Corner3;
+    use crate::math::enums::Corner3;
 
     #[test]
     fn octree_new() {

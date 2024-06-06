@@ -4,7 +4,7 @@ use super::{
     node::{Node, Octants},
     octant::Octant,
 };
-use crate::math_enums::Corner3;
+use crate::math::enums::Corner3;
 
 /// An iterator over [`Octant`]s and their values within an octree.
 #[derive(Debug)]

@@ -3,7 +3,7 @@ use itertools::{repeat_n, Itertools};
 use replace_with::replace_with_or_abort;
 
 use super::octant::{Octant, OctantCorners};
-use crate::math_enums::Corner3;
+use crate::math::enums::Corner3;
 
 /// A node within an octree holding either a value or a split into 8 octants which are also nodes.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
