@@ -1,11 +1,11 @@
 use std::ops::{Index, IndexMut};
 
-use bevy::math::{
+use enum_map::Enum;
+use enumset::{EnumSet, EnumSetType};
+use glam::{
     BVec2, BVec3, BVec4, DVec2, DVec3, DVec4, IVec2, IVec3, IVec4, UVec2, UVec3, UVec4, Vec2, Vec3,
     Vec3A, Vec4,
 };
-use enum_map::Enum;
-use enumset::{EnumSet, EnumSetType};
 
 macro_rules! impl_from_for_scalar {
     { $enum_type:ident for $value_type:ident { $( $variant:ident => $value:expr, )* } } => {

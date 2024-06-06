@@ -1,0 +1,15 @@
+[package]
+name = "unbound-lib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+array-init.workspace = true
+arrayvec.workspace = true
+bitvec.workspace = true
+derive-where.workspace = true
+enum-map.workspace = true
+enumset.workspace = true
+glam.workspace = true
+itertools.workspace = true
+replace_with.workspace = true

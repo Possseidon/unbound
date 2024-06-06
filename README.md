@@ -4,8 +4,9 @@ A [Minecraft](https://www.minecraft.net/en-us/about-minecraft) inspired game/-en
 
 ## Project Structure
 
-Split into three different crates:
+Split into four different crates:
 
 - [unbound-client](./unbound-client) - The executable that runs the game itself (can also host servers)
 - [unbound-server](./unbound-server) - A separate (smaller) executable without a GUI for dedicated servers
 - [unbound-shared](./unbound-shared) - A library that contains code that is used by both client and server
+- [unbound-lib](./unbound-lib) - Contains generic utilities that (unlike `unbound-shared`) don't depend on [bevy](https://bevyengine.org/)
