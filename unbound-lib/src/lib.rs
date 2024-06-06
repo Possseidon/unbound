@@ -1,3 +1,4 @@
+pub mod bounds;
 pub mod change_tracking;
 pub mod marching_cubes;
 pub mod math_enums;
