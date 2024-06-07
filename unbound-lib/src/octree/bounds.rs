@@ -8,38 +8,61 @@ pub struct OctreeBounds {
     /// The position within the octree where the bounds start.
     ///
     /// Must be a multiple of [`Self::extent`] and at most [`i32::MAX`].
-    pos: UVec3,
+    min: UVec3,
     /// The extent of the bounds.
     extent: OctreeExtent,
 }
 
 impl OctreeBounds {
+    /// Constructs an [`OctreeBounds`] with the specified `extent` at the origin.
     pub const fn from_extent(extent: OctreeExtent) -> Self {
         Self {
-            pos: UVec3::ZERO,
+            min: UVec3::ZERO,
             extent,
         }
     }
 
-    pub const fn from_point(pos: UVec3) -> Self {
+    /// Constructs an [`OctreeBounds`] with [`OctreeExtent::ONE`] at the specified `pos`.
+    pub const fn from_point(point: UVec3) -> Self {
         Self {
-            pos,
+            min: point,
             extent: OctreeExtent::ONE,
         }
     }
 
+    /// If the bounds only cover a single point, returns that point.
     pub const fn to_point(self) -> Option<UVec3> {
         if let OctreeExtent::ONE = self.extent {
-            Some(self.pos)
+            Some(self.min)
         } else {
             None
         }
     }
 
-    pub const fn pos(self) -> UVec3 {
-        self.pos
+    /// The lower bound (inclusive).
+    pub const fn min(self) -> UVec3 {
+        self.min
     }
 
+    /// The upper bound (inclusive).
+    pub const fn max(self) -> UVec3 {
+        let [x, y, z] = self.extent.size_log2();
+        uvec3(
+            self.min.x + (1 << x) - 1,
+            self.min.y + (1 << y) - 1,
+            self.min.z + (1 << z) - 1,
+        )
+    }
+
+    /// Whether the specified `point` is part of the bounds.
+    pub const fn contains(self, point: UVec3) -> bool {
+        let max = self.max();
+        (self.min.x <= point.x && point.x <= max.x)
+            && (self.min.y <= point.y && point.y <= max.y)
+            && (self.min.z <= point.z && point.z <= max.z)
+    }
+
+    /// The extent of the bounds.
     pub const fn extent(self) -> OctreeExtent {
         self.extent
     }
@@ -55,7 +78,7 @@ impl OctreeBounds {
         // limited to 7; only up to 6 splits are actually used
         assert!(total_splits < 8);
         OctreeBoundsSplit {
-            origin: self.pos,
+            origin: self.min,
             extent: self.extent.split(splits),
             x_splits: splits.x(),
             y_splits: splits.y(),
@@ -120,7 +143,7 @@ impl Iterator for OctreeBoundsSplit {
         );
 
         Some(OctreeBounds {
-            pos: self.origin + offset,
+            min: self.origin + offset,
             extent: self.extent,
         })
     }
