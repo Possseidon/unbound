@@ -7,9 +7,8 @@ use itertools::zip_eq;
 use super::{
     bounds::{OctreeBounds, OctreeBoundsSplit},
     extent::OctreeSplits,
-    visit::{OctreeVisitor, OctreeVisitorMut, VisitSplit},
+    visit::{OctreeVisitor, OctreeVisitorMut, VisitBoundsMut, VisitSplit},
 };
-use crate::change_tracking::Mut;
 
 /// A node within an octree, either holding a value of type `T` or more [`Node`]s.
 ///
@@ -93,10 +92,13 @@ impl<T> Node<T> {
         nodes: &[Self; N],
         splits: &[OctreeSplits],
     ) {
-        if visitor.visit_split(bounds) {
-            let (bounds_split, remaining_splits) = Self::next_splits(bounds, splits);
-            for (node, split_bounds) in zip_eq(nodes, bounds_split) {
-                node.visit(visitor, split_bounds, remaining_splits);
+        match visitor.visit_split(bounds) {
+            VisitSplit::Skip => {}
+            VisitSplit::Enter => {
+                let (bounds_split, remaining_splits) = Self::next_splits(bounds, splits);
+                for (node, split_bounds) in zip_eq(nodes, bounds_split) {
+                    node.visit(visitor, split_bounds, remaining_splits);
+                }
             }
         }
     }
@@ -199,6 +201,17 @@ impl<T: Clone> Node<T> {
 }
 
 impl<T: PartialEq> Node<T> {
+    /// Updates `value` to `new_value` if it differes.
+    ///
+    /// Returns `true` if the value has to be updated.
+    fn update_if_changed(value: &mut T, new_value: T) -> bool {
+        let changed = new_value != *value;
+        if changed {
+            *value = new_value;
+        }
+        changed
+    }
+
     /// Returns the first value if all values are the same.
     ///
     /// Otherwise returns an [`Err`] with the original values.
@@ -282,90 +295,92 @@ impl<T: Clone + PartialEq> Node<T> {
         value: &mut T,
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
-        let mut change_tracker = Mut::new(value);
         if let Some(pos) = bounds.to_point() {
-            visitor.visit_value_mut(pos, &mut change_tracker);
-            VisitMutResult::Changed(Mut::changed(&change_tracker))
-        } else if visitor.visit_bounds_mut(bounds, &mut change_tracker) {
-            let (&last_splits, remaining_splits) =
-                splits.split_last().expect("splits should not be empty");
-            let bounds_split = bounds.split(last_splits);
-            let total_splits = last_splits.total();
+            return VisitMutResult::Changed(
+                visitor
+                    .visit_value_mut(pos, value)
+                    .map_or(false, |new_value| Self::update_if_changed(value, new_value)),
+            );
+        }
 
-            let mut values = Vec::new();
-            let mut nodes = Vec::new();
+        match visitor.visit_bounds_mut(bounds, Some(value)) {
+            VisitBoundsMut::Skip => VisitMutResult::Changed(false),
+            VisitBoundsMut::Fill(new_value) => {
+                VisitMutResult::Changed(Self::update_if_changed(value, new_value))
+            }
+            VisitBoundsMut::Split => {
+                let (&last_splits, remaining_splits) =
+                    splits.split_last().expect("splits should not be empty");
+                let bounds_split = bounds.split(last_splits);
+                let total_splits = last_splits.total();
 
-            for (already_processed, split_bounds) in bounds_split.enumerate() {
-                let mut inner_value = change_tracker.clone();
-                match Self::visit_value_mut(
-                    visitor,
-                    split_bounds,
-                    &mut inner_value,
-                    remaining_splits,
-                ) {
-                    VisitMutResult::Changed(false) => {
-                        if !nodes.is_empty() {
-                            nodes.push(Self::Value(inner_value));
-                        } else if !values.is_empty() {
-                            values.push(inner_value);
-                        }
-                    }
-                    VisitMutResult::Changed(true) => {
-                        if !nodes.is_empty() {
-                            nodes.push(Self::Value(inner_value));
-                        } else {
-                            if values.is_empty() {
-                                // transition value -> values
-                                values.reserve_exact(1 << total_splits);
-                                values.extend(
-                                    repeat(&*change_tracker).take(already_processed).cloned(),
-                                )
+                let mut values = Vec::new();
+                let mut nodes = Vec::new();
+
+                for (already_processed, split_bounds) in bounds_split.enumerate() {
+                    let mut inner_value = value.clone();
+                    match Self::visit_value_mut(
+                        visitor,
+                        split_bounds,
+                        &mut inner_value,
+                        remaining_splits,
+                    ) {
+                        VisitMutResult::Changed(false) => {
+                            if !nodes.is_empty() {
+                                nodes.push(Self::Value(inner_value));
+                            } else if !values.is_empty() {
+                                values.push(inner_value);
                             }
-                            values.push(inner_value);
                         }
-                    }
-                    VisitMutResult::Replace(node) => {
-                        if nodes.is_empty() {
-                            // transition value(s) -> nodes
-                            nodes.reserve_exact(1 << total_splits);
-                            if values.is_empty() {
-                                // transition value -> nodes
-                                nodes.extend(
-                                    repeat(&*change_tracker)
-                                        .take(already_processed)
-                                        .cloned()
-                                        .map(Self::Value),
-                                );
+                        VisitMutResult::Changed(true) => {
+                            if !nodes.is_empty() {
+                                nodes.push(Self::Value(inner_value));
                             } else {
-                                // transition values -> nodes
-                                nodes.extend(values.drain(..).map(Self::Value));
+                                if values.is_empty() {
+                                    // transition value -> values
+                                    values.reserve_exact(1 << total_splits);
+                                    values.extend(repeat(&*value).take(already_processed).cloned())
+                                }
+                                values.push(inner_value);
                             }
                         }
-                        nodes.push(node);
+                        VisitMutResult::Replace(node) => {
+                            if nodes.is_empty() {
+                                // transition value(s) -> nodes
+                                nodes.reserve_exact(1 << total_splits);
+                                if values.is_empty() {
+                                    // transition value -> nodes
+                                    nodes.extend(
+                                        repeat(&*value)
+                                            .take(already_processed)
+                                            .cloned()
+                                            .map(Self::Value),
+                                    );
+                                } else {
+                                    // transition values -> nodes
+                                    nodes.extend(values.drain(..).map(Self::Value));
+                                }
+                            }
+                            nodes.push(node);
+                        }
                     }
                 }
-            }
 
-            if !nodes.is_empty() {
-                VisitMutResult::Replace(Self::split_from_vec(total_splits, nodes))
-            } else if !values.is_empty() {
-                match Self::value_from_values_vec(values) {
-                    Ok(equal_value) if equal_value == *change_tracker => {
-                        VisitMutResult::Changed(false)
+                if !nodes.is_empty() {
+                    VisitMutResult::Replace(Self::split_from_vec(total_splits, nodes))
+                } else if !values.is_empty() {
+                    match Self::value_from_values_vec(values) {
+                        Ok(new_value) => {
+                            VisitMutResult::Changed(Self::update_if_changed(value, new_value))
+                        }
+                        Err(values) => {
+                            VisitMutResult::Replace(Self::values_from_vec(total_splits, values))
+                        }
                     }
-                    Ok(equal_value) => {
-                        *value = equal_value;
-                        VisitMutResult::Changed(true)
-                    }
-                    Err(values) => {
-                        VisitMutResult::Replace(Self::values_from_vec(total_splits, values))
-                    }
+                } else {
+                    VisitMutResult::Changed(false)
                 }
-            } else {
-                VisitMutResult::Changed(Mut::changed(&change_tracker))
             }
-        } else {
-            VisitMutResult::Changed(Mut::changed(&change_tracker))
         }
     }
 
@@ -386,9 +401,10 @@ impl<T: Clone + PartialEq> Node<T> {
         values: &mut [T; N],
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
-        match visitor.visit_split_mut(bounds) {
-            VisitSplit::Skip => VisitMutResult::Changed(false),
-            VisitSplit::Enter => {
+        match visitor.visit_bounds_mut(bounds, None) {
+            VisitBoundsMut::Skip => VisitMutResult::Changed(false),
+            VisitBoundsMut::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
+            VisitBoundsMut::Split => {
                 let (&last_splits, remaining_splits) =
                     splits.split_last().expect("splits should not be empty");
                 let bounds_split = bounds.split(last_splits);
@@ -449,7 +465,6 @@ impl<T: Clone + PartialEq> Node<T> {
                     VisitMutResult::Changed(false)
                 }
             }
-            VisitSplit::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
         }
     }
 
@@ -469,9 +484,10 @@ impl<T: Clone + PartialEq> Node<T> {
         nodes: &mut [Self; N],
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
-        match visitor.visit_split_mut(bounds) {
-            VisitSplit::Skip => VisitMutResult::Changed(false),
-            VisitSplit::Enter => {
+        match visitor.visit_bounds_mut(bounds, None) {
+            VisitBoundsMut::Skip => VisitMutResult::Changed(false),
+            VisitBoundsMut::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
+            VisitBoundsMut::Split => {
                 let (bounds_split, remaining_splits) = Self::next_splits(bounds, splits);
                 let changed = zip_eq(nodes.iter_mut(), bounds_split).fold(
                     false,
@@ -493,7 +509,6 @@ impl<T: Clone + PartialEq> Node<T> {
                     VisitMutResult::Changed(false)
                 }
             }
-            VisitSplit::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
         }
     }
 }
