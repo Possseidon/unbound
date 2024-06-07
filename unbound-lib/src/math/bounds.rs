@@ -95,7 +95,7 @@ impl IBounds3 {
         uvec3(size.x as u32 + 1, size.y as u32 + 1, size.z as u32 + 1)
     }
 
-    /// Whether the specified `point` is part of this [`IBounds3`].
+    /// Whether the specified `point` is part of the bounds.
     pub const fn contains(self, point: IVec3) -> bool {
         (self.min.x <= point.x && point.x <= self.max.x)
             && (self.min.y <= point.y && point.y <= self.max.y)
@@ -120,21 +120,21 @@ impl IBounds3 {
 
     /// Maps a point `min..max` to an offset `0..size`.
     ///
-    /// Returns [`None`] if `point` lies outside the valid range of the [`IBounds3`].
+    /// Returns [`None`] if `point` lies outside the valid range of the bounds.
     pub const fn map_uvec3(self, point: IVec3) -> Option<UVec3> {
         self.map_uvec3_with_origin(point, UVec3::ZERO)
     }
 
     /// Maps an offset `0..size` to a point `min..max`.
     ///
-    /// Returns [`None`] if the resulting point lies outside the valid range of the [`IBounds3`].
+    /// Returns [`None`] if the resulting point lies outside the valid range of the bounds.
     pub const fn unmap_uvec3(self, offset: UVec3) -> Option<IVec3> {
         self.unmap_uvec3_with_origin(offset, UVec3::ZERO)
     }
 
     /// Maps a point `min..max` to an offset `origin..origin + extent`.
     ///
-    /// Returns [`None`] if `point` lies outside the valid range of the [`IBounds3`].
+    /// Returns [`None`] if `point` lies outside the valid range of the bounds.
     pub const fn map_uvec3_with_origin(self, point: IVec3, origin: UVec3) -> Option<UVec3> {
         if self.contains(point) {
             let offset = point.wrapping_sub(self.min);
