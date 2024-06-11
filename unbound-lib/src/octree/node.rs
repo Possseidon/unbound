@@ -7,7 +7,7 @@ use itertools::zip_eq;
 use super::{
     bounds::{OctreeBounds, OctreeBoundsSplit},
     extent::OctreeSplits,
-    visit::{OctreeVisitor, OctreeVisitorMut, VisitBoundsMut, VisitSplit},
+    visit::{OctreeFinder, OctreeFlowControl, OctreeVisitor, OctreeVisitorMut, VisitBoundsMut},
 };
 
 /// A node within an octree, either holding a value of type `T` or more [`Node`]s.
@@ -48,6 +48,34 @@ pub(crate) enum Node<T> {
 }
 
 impl<T> Node<T> {
+    pub(crate) fn find(
+        &self,
+        target_bounds: OctreeBounds,
+        bounds: OctreeBounds,
+        splits: &[OctreeSplits],
+    ) -> Self {
+        match self {
+            Self::Value(value) => Self::Value(value),
+            Self::Values2(_) => self.find_in_values(flow_control),
+            Self::Values4(_) => self.find_in_values(flow_control),
+            Self::Values8(_) => self.find_in_values(flow_control),
+            Self::Values16(_) => self.find_in_values(flow_control),
+            Self::Values32(_) => self.find_in_values(flow_control),
+            Self::Values64(_) => self.find_in_values(flow_control),
+            Self::Split2(_) => todo!(),
+            Self::Split4(_) => todo!(),
+            Self::Split8(_) => todo!(),
+            Self::Split16(_) => todo!(),
+            Self::Split32(_) => todo!(),
+            Self::Split64(_) => todo!(),
+        }
+        match flow_control(bounds) {
+            OctreeFlowControl::Skip => todo!(),
+            OctreeFlowControl::Enter => todo!(),
+            OctreeFlowControl::Return => todo!(),
+        }
+    }
+
     /// Recursively visits all splits and values using the given `visitor`.
     pub(crate) fn visit(
         &self,
@@ -93,8 +121,8 @@ impl<T> Node<T> {
         splits: &[OctreeSplits],
     ) {
         match visitor.visit_split(bounds) {
-            VisitSplit::Skip => {}
-            VisitSplit::Enter => {
+            OctreeFlowControl::Skip => {}
+            OctreeFlowControl::Enter => {
                 let (bounds_split, remaining_splits) = Self::next_splits(bounds, splits);
                 for (node, split_bounds) in zip_eq(nodes, bounds_split) {
                     node.visit(visitor, split_bounds, remaining_splits);
@@ -296,12 +324,12 @@ impl<T: Clone + PartialEq> Node<T> {
         if let Some(pos) = bounds.to_point() {
             return VisitMutResult::Changed(
                 visitor
-                    .visit_value_mut(pos, value)
+                    .visit_value(pos, value)
                     .map_or(false, |new_value| Self::update_if_changed(value, new_value)),
             );
         }
 
-        match visitor.visit_bounds_mut(bounds, Some(value)) {
+        match visitor.visit_bounds(bounds, Some(value)) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
             VisitBoundsMut::Fill(new_value) => {
                 VisitMutResult::Changed(Self::update_if_changed(value, new_value))
@@ -399,7 +427,7 @@ impl<T: Clone + PartialEq> Node<T> {
         values: &mut Arc<[T; N]>,
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
-        match visitor.visit_bounds_mut(bounds, None) {
+        match visitor.visit_bounds(bounds, None) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
             VisitBoundsMut::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
             VisitBoundsMut::Split => {
@@ -483,7 +511,7 @@ impl<T: Clone + PartialEq> Node<T> {
         nodes: &mut Arc<[Self; N]>,
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
-        match visitor.visit_bounds_mut(bounds, None) {
+        match visitor.visit_bounds(bounds, None) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
             VisitBoundsMut::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
             VisitBoundsMut::Split => {
@@ -522,3 +550,5 @@ enum VisitMutResult<T> {
     Changed(bool),
     Replace(Node<T>),
 }
+
+trait NodeVisitor {}
