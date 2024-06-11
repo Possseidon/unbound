@@ -1,4 +1,4 @@
-use std::iter::repeat;
+use std::{iter::repeat, sync::Arc};
 
 use array_init::map_array_init;
 use glam::UVec3;
@@ -26,25 +26,25 @@ use super::{
 /// - `Split<N>` holds `N` splits, resulting in `2^N` child nodes
 /// - `Values<N>` is an optimization for `Split<N>` nodes that only hold values
 ///
-/// Arrays of nodes (and values) are stored as `Box<[T; N]>` spread across different enum variants
+/// Arrays of nodes (and values) are stored as `Arc<[T; N]>` spread across different enum variants
 /// to avoid fat pointers, increasing the total size of [`Node`] itself. This is admittedly a bit
 /// annyoing to work with, but at least it also improves type-safety by preventing arrays of
 /// non-power-of-two sizes.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum Node<T> {
     Value(T),
-    Values2(Box<[T; 2]>),
-    Values4(Box<[T; 4]>),
-    Values8(Box<[T; 8]>),
-    Values16(Box<[T; 16]>),
-    Values32(Box<[T; 32]>),
-    Values64(Box<[T; 64]>),
-    Split2(Box<[Node<T>; 2]>),
-    Split4(Box<[Node<T>; 4]>),
-    Split8(Box<[Node<T>; 8]>),
-    Split16(Box<[Node<T>; 16]>),
-    Split32(Box<[Node<T>; 32]>),
-    Split64(Box<[Node<T>; 64]>),
+    Values2(Arc<[T; 2]>),
+    Values4(Arc<[T; 4]>),
+    Values8(Arc<[T; 8]>),
+    Values16(Arc<[T; 16]>),
+    Values32(Arc<[T; 32]>),
+    Values64(Arc<[T; 64]>),
+    Split2(Arc<[Node<T>; 2]>),
+    Split4(Arc<[Node<T>; 4]>),
+    Split8(Arc<[Node<T>; 8]>),
+    Split16(Arc<[Node<T>; 16]>),
+    Split32(Arc<[Node<T>; 32]>),
+    Split64(Arc<[Node<T>; 64]>),
 }
 
 impl<T> Node<T> {
@@ -128,12 +128,11 @@ impl<T> Node<T> {
     }
 
     /// Returns a `Node::Values<N>` via `new` using the given `values`.
-    fn values_from_vec_impl<const N: usize>(values: Vec<T>, new: fn(Box<[T; N]>) -> Self) -> Self {
-        new(values
-            .into_boxed_slice()
-            .try_into()
+    fn values_from_vec_impl<const N: usize>(values: Vec<T>, new: fn(Arc<[T; N]>) -> Self) -> Self {
+        new(<Box<[T; N]>>::try_from(values.into_boxed_slice())
             .ok()
-            .expect("nodes should have correct len"))
+            .expect("nodes should have correct len")
+            .into())
     }
 
     /// Returns a `Node::Split<N>` for `total_splits` using the given `nodes`.
@@ -152,13 +151,12 @@ impl<T> Node<T> {
     /// Returns a `Node::Split<N>` via `new` using the given `nodes`.
     fn split_from_vec_impl<const N: usize>(
         nodes: Vec<Self>,
-        new: fn(Box<[Self; N]>) -> Self,
+        new: fn(Arc<[Self; N]>) -> Self,
     ) -> Self {
-        new(nodes
-            .into_boxed_slice()
-            .try_into()
+        new(<Box<[Self; N]>>::try_from(nodes.into_boxed_slice())
             .ok()
-            .expect("nodes should have correct len"))
+            .expect("nodes should have correct len")
+            .into())
     }
 }
 
@@ -185,8 +183,8 @@ impl<T: Clone> Node<T> {
     /// # Panics
     ///
     /// Panics if the length of `nodes` does not match `new` or if there is any non-[`Node::Value`].
-    fn values_from_nodes<const N: usize>(nodes: &[Self], new: fn(Box<[T; N]>) -> Self) -> Self {
-        new(Box::new(map_array_init(
+    fn values_from_nodes<const N: usize>(nodes: &[Self], new: fn(Arc<[T; N]>) -> Self) -> Self {
+        new(Arc::new(map_array_init(
             nodes.try_into().expect("nodes should have the correct len"),
             |node| {
                 if let Self::Value(value) = node {
@@ -398,7 +396,7 @@ impl<T: Clone + PartialEq> Node<T> {
     fn visit_values_mut<const N: usize>(
         visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
         bounds: OctreeBounds,
-        values: &mut [T; N],
+        values: &mut Arc<[T; N]>,
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
         match visitor.visit_bounds_mut(bounds, None) {
@@ -413,6 +411,7 @@ impl<T: Clone + PartialEq> Node<T> {
                 let mut any_changed = false;
                 let mut nodes = Vec::new();
 
+                let values = Arc::make_mut(values);
                 for (index, split_bounds) in bounds_split.enumerate() {
                     match Self::visit_value_mut(
                         visitor,
@@ -481,7 +480,7 @@ impl<T: Clone + PartialEq> Node<T> {
     fn visit_split_mut<const N: usize>(
         visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
         bounds: OctreeBounds,
-        nodes: &mut [Self; N],
+        nodes: &mut Arc<[Self; N]>,
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
         match visitor.visit_bounds_mut(bounds, None) {
@@ -489,7 +488,7 @@ impl<T: Clone + PartialEq> Node<T> {
             VisitBoundsMut::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
             VisitBoundsMut::Split => {
                 let (bounds_split, remaining_splits) = Self::next_splits(bounds, splits);
-                let changed = zip_eq(nodes.iter_mut(), bounds_split).fold(
+                let changed = zip_eq(Arc::make_mut(nodes).iter_mut(), bounds_split).fold(
                     false,
                     |acc, (node, split_bounds)| {
                         // bitor to prevent skipping nodes
@@ -497,10 +496,10 @@ impl<T: Clone + PartialEq> Node<T> {
                     },
                 );
                 if changed {
-                    if let Some(value) = Self::value_from_nodes(nodes) {
+                    if let Some(value) = Self::value_from_nodes(&**nodes) {
                         // clone could technically be avoided; but tricky
                         VisitMutResult::Replace(Self::Value(value.clone()))
-                    } else if let Some(values) = Self::values_if_all_value(nodes) {
+                    } else if let Some(values) = Self::values_if_all_value(&**nodes) {
                         VisitMutResult::Replace(values)
                     } else {
                         VisitMutResult::Changed(true)
