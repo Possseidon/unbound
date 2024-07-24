@@ -23,7 +23,7 @@ use super::{
 /// # Variants
 ///
 /// - `Value` is the basic "leaf" node of the octree that holds the actual values
-/// - `Split<N>` holds `N` splits, resulting in `2^N` child nodes
+/// - `Split<N>` holds `N` child nodes, representing `log2(N)` splits
 /// - `Values<N>` is an optimization for `Split<N>` nodes that only hold values
 ///
 /// Arrays of nodes (and values) are stored as `Arc<[T; N]>` spread across different enum variants
