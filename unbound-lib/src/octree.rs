@@ -11,8 +11,13 @@ use visit::{OctreeVisitor, OctreeVisitorMut};
 
 /// An octree storing values of type `T` with side lengths that must be powers of two.
 ///
-/// The internal representation does not just use a basic octree, but is instead stores multiple
-/// levels within the same node.
+/// Unlike with normal octrees, the side lengths do not have to be equal. In fact, this type can be
+/// used perfectly fine as a quadtree as well.
+///
+/// Octree subdivisions are not limited to `2x2x2` and instead store up to 64 child nodes. This will
+/// usually result in subdivisions of size `4x4x4`, but could also be e.g. `8x8x1`, `2x4x8` or
+/// `2x1x1`. Note, that the subdivision layout is not stored within each node, but instead is
+/// calculated on the fly when traversing the octree (based on the full extent of the octree).
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub struct Octree<T> {
     /// The root node of the octree.
