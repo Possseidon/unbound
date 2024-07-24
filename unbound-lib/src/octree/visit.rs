@@ -37,7 +37,7 @@ pub trait OctreeVisitorMut {
     ///
     /// It is perfectly fine to return [`Some`] with a copy of the original `value`. The value will
     /// be checked for changes internally as a safe-guard.
-    fn visit_value_mut(&mut self, pos: Self::Pos, value: &Self::Value) -> Option<Self::Value>;
+    fn visit_value(&mut self, pos: Self::Pos, value: &Self::Value) -> Option<Self::Value>;
     /// Called for bounds.
     ///
     /// `value` is set if the bounds contain one homogeneous value.
@@ -46,7 +46,7 @@ pub trait OctreeVisitorMut {
     ///
     /// It is perfectly fine to return [`VisitBoundsMut::Fill`] with the same original `value`. The
     /// value will be checked for changes internally as a safe-guard.
-    fn visit_bounds_mut(
+    fn visit_bounds(
         &mut self,
         bounds: Self::Bounds,
         value: Option<&Self::Value>,

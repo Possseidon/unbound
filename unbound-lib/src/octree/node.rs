@@ -296,12 +296,12 @@ impl<T: Clone + PartialEq> Node<T> {
         if let Some(pos) = bounds.to_point() {
             return VisitMutResult::Changed(
                 visitor
-                    .visit_value_mut(pos, value)
+                    .visit_value(pos, value)
                     .map_or(false, |new_value| Self::update_if_changed(value, new_value)),
             );
         }
 
-        match visitor.visit_bounds_mut(bounds, Some(value)) {
+        match visitor.visit_bounds(bounds, Some(value)) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
             VisitBoundsMut::Fill(new_value) => {
                 VisitMutResult::Changed(Self::update_if_changed(value, new_value))
@@ -399,7 +399,7 @@ impl<T: Clone + PartialEq> Node<T> {
         values: &mut Arc<[T; N]>,
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
-        match visitor.visit_bounds_mut(bounds, None) {
+        match visitor.visit_bounds(bounds, None) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
             VisitBoundsMut::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
             VisitBoundsMut::Split => {
@@ -483,7 +483,7 @@ impl<T: Clone + PartialEq> Node<T> {
         nodes: &mut Arc<[Self; N]>,
         splits: &[OctreeSplits],
     ) -> VisitMutResult<T> {
-        match visitor.visit_bounds_mut(bounds, None) {
+        match visitor.visit_bounds(bounds, None) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
             VisitBoundsMut::Fill(value) => VisitMutResult::Replace(Node::Value(value)),
             VisitBoundsMut::Split => {
