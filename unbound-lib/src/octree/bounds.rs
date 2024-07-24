@@ -67,12 +67,7 @@ impl OctreeBounds {
         self.extent
     }
 
-    /// Returns up to 6 splits (64 sub-bounds) in Z-order.
-    ///
-    /// Positions of each split are yielded by the [`OctreeBoundsSplit`] iterator. The extent of the
-    /// sub-bounds is returned separate, since it is the same for all.
-    ///
-    /// See [`OctreeExtent::split_towards_cube`] for more info on splitting.
+    /// Splits the bounds according to `splits` and returns an iterator over the resulting bounds.
     pub fn split(self, splits: OctreeSplits) -> OctreeBoundsSplit {
         let total_splits = splits.total();
         // limited to 7; only up to 6 splits are actually used
