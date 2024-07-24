@@ -57,18 +57,18 @@ impl<T> Node<T> {
     ) {
         match self {
             Self::Value(value) => visitor.visit_bounds(bounds, value),
-            Self::Values2(values) => Self::visit_values(visitor, bounds, values, splits),
-            Self::Values4(values) => Self::visit_values(visitor, bounds, values, splits),
-            Self::Values8(values) => Self::visit_values(visitor, bounds, values, splits),
-            Self::Values16(values) => Self::visit_values(visitor, bounds, values, splits),
-            Self::Values32(values) => Self::visit_values(visitor, bounds, values, splits),
-            Self::Values64(values) => Self::visit_values(visitor, bounds, values, splits),
-            Self::Split2(nodes) => Self::visit_split(visitor, bounds, nodes, splits),
-            Self::Split4(nodes) => Self::visit_split(visitor, bounds, nodes, splits),
-            Self::Split8(nodes) => Self::visit_split(visitor, bounds, nodes, splits),
-            Self::Split16(nodes) => Self::visit_split(visitor, bounds, nodes, splits),
-            Self::Split32(nodes) => Self::visit_split(visitor, bounds, nodes, splits),
-            Self::Split64(nodes) => Self::visit_split(visitor, bounds, nodes, splits),
+            Self::Values2(values) => Self::visit_values(visitor, bounds, splits, values),
+            Self::Values4(values) => Self::visit_values(visitor, bounds, splits, values),
+            Self::Values8(values) => Self::visit_values(visitor, bounds, splits, values),
+            Self::Values16(values) => Self::visit_values(visitor, bounds, splits, values),
+            Self::Values32(values) => Self::visit_values(visitor, bounds, splits, values),
+            Self::Values64(values) => Self::visit_values(visitor, bounds, splits, values),
+            Self::Split2(nodes) => Self::visit_split(visitor, bounds, splits, nodes),
+            Self::Split4(nodes) => Self::visit_split(visitor, bounds, splits, nodes),
+            Self::Split8(nodes) => Self::visit_split(visitor, bounds, splits, nodes),
+            Self::Split16(nodes) => Self::visit_split(visitor, bounds, splits, nodes),
+            Self::Split32(nodes) => Self::visit_split(visitor, bounds, splits, nodes),
+            Self::Split64(nodes) => Self::visit_split(visitor, bounds, splits, nodes),
         }
     }
 
@@ -76,8 +76,8 @@ impl<T> Node<T> {
     fn visit_values<const N: usize>(
         visitor: &mut impl OctreeVisitor<Value = T, Bounds = OctreeBounds>,
         bounds: OctreeBounds,
-        values: &[T; N],
         splits: &[OctreeSplits],
+        values: &[T; N],
     ) {
         let bounds_split = bounds.split(*splits.last().expect("splits should not be empty"));
         for (split_bounds, value) in zip_eq(bounds_split, values) {
@@ -85,12 +85,12 @@ impl<T> Node<T> {
         }
     }
 
-    /// If a call to [`OctreeVisitor::visit_split`] returns `true`, recurses into that node.
+    /// If [`OctreeVisitor::visit_split`] returns [`VisitSplit::Enter`], recurses into that node.
     fn visit_split<const N: usize>(
         visitor: &mut impl OctreeVisitor<Value = T, Bounds = OctreeBounds>,
         bounds: OctreeBounds,
-        nodes: &[Self; N],
         splits: &[OctreeSplits],
+        nodes: &[Self; N],
     ) {
         match visitor.visit_split(bounds) {
             VisitSplit::Skip => {}
@@ -254,19 +254,19 @@ impl<T: Clone + PartialEq> Node<T> {
         splits: &[OctreeSplits],
     ) -> bool {
         let result = match self {
-            Self::Value(value) => Self::visit_value_mut(visitor, bounds, value, splits),
-            Self::Values2(values) => Self::visit_values_mut(visitor, bounds, values, splits),
-            Self::Values4(values) => Self::visit_values_mut(visitor, bounds, values, splits),
-            Self::Values8(values) => Self::visit_values_mut(visitor, bounds, values, splits),
-            Self::Values16(values) => Self::visit_values_mut(visitor, bounds, values, splits),
-            Self::Values32(values) => Self::visit_values_mut(visitor, bounds, values, splits),
-            Self::Values64(values) => Self::visit_values_mut(visitor, bounds, values, splits),
-            Self::Split2(nodes) => Self::visit_split_mut(visitor, bounds, nodes, splits),
-            Self::Split4(nodes) => Self::visit_split_mut(visitor, bounds, nodes, splits),
-            Self::Split8(nodes) => Self::visit_split_mut(visitor, bounds, nodes, splits),
-            Self::Split16(nodes) => Self::visit_split_mut(visitor, bounds, nodes, splits),
-            Self::Split32(nodes) => Self::visit_split_mut(visitor, bounds, nodes, splits),
-            Self::Split64(nodes) => Self::visit_split_mut(visitor, bounds, nodes, splits),
+            Self::Value(value) => Self::visit_value_mut(visitor, bounds, splits, value),
+            Self::Values2(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+            Self::Values4(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+            Self::Values8(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+            Self::Values16(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+            Self::Values32(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+            Self::Values64(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+            Self::Split2(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+            Self::Split4(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+            Self::Split8(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+            Self::Split16(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+            Self::Split32(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+            Self::Split64(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
         };
         match result {
             VisitMutResult::Replace(node) => {
@@ -290,8 +290,8 @@ impl<T: Clone + PartialEq> Node<T> {
     fn visit_value_mut(
         visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
         bounds: OctreeBounds,
-        value: &mut T,
         splits: &[OctreeSplits],
+        value: &mut T,
     ) -> VisitMutResult<T> {
         if let Some(pos) = bounds.to_point() {
             return VisitMutResult::Changed(
@@ -320,8 +320,8 @@ impl<T: Clone + PartialEq> Node<T> {
                     match Self::visit_value_mut(
                         visitor,
                         split_bounds,
-                        &mut inner_value,
                         remaining_splits,
+                        &mut inner_value,
                     ) {
                         VisitMutResult::Changed(false) => {
                             if !nodes.is_empty() {
@@ -396,8 +396,8 @@ impl<T: Clone + PartialEq> Node<T> {
     fn visit_values_mut<const N: usize>(
         visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
         bounds: OctreeBounds,
-        values: &mut Arc<[T; N]>,
         splits: &[OctreeSplits],
+        values: &mut Arc<[T; N]>,
     ) -> VisitMutResult<T> {
         match visitor.visit_bounds(bounds, None) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
@@ -416,8 +416,8 @@ impl<T: Clone + PartialEq> Node<T> {
                     match Self::visit_value_mut(
                         visitor,
                         split_bounds,
-                        &mut values[index],
                         remaining_splits,
+                        &mut values[index],
                     ) {
                         VisitMutResult::Changed(changed) => {
                             if nodes.is_empty() {
@@ -480,8 +480,8 @@ impl<T: Clone + PartialEq> Node<T> {
     fn visit_split_mut<const N: usize>(
         visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
         bounds: OctreeBounds,
-        nodes: &mut Arc<[Self; N]>,
         splits: &[OctreeSplits],
+        nodes: &mut Arc<[Self; N]>,
     ) -> VisitMutResult<T> {
         match visitor.visit_bounds(bounds, None) {
             VisitBoundsMut::Skip => VisitMutResult::Changed(false),
