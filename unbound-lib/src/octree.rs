@@ -30,6 +30,14 @@ impl<T> Octree<T> {
         }
     }
 
+    /// Constructs an [`Octree`] with the specified `extent` filled by the [`Default`] value of `T`.
+    pub fn with_default(extent: OctreeExtent) -> Self
+    where
+        T: Default,
+    {
+        Self::new(T::default(), extent)
+    }
+
     /// The extent of this octree.
     pub fn extent(&self) -> OctreeExtent {
         self.extent
