@@ -62,6 +62,17 @@ impl OctreeBounds {
             && (self.min.z <= point.z && point.z <= max.z)
     }
 
+    /// Whether the bounds fully enclose `other`.
+    ///
+    /// Inclusive, so an [`OctreeBounds`] always encloses itself.
+    pub const fn encloses(self, other: Self) -> bool {
+        let self_max = self.max();
+        let other_max = other.max();
+        (self.min.x <= other.min.x && other_max.x <= self_max.x)
+            && (self.min.y <= other.min.y && other_max.y <= self_max.y)
+            && (self.min.z <= other.min.z && other_max.z <= self_max.z)
+    }
+
     /// The extent of the bounds.
     pub const fn extent(self) -> OctreeExtent {
         self.extent
