@@ -114,15 +114,15 @@ impl<T> Node<T> {
         (bounds_split, remaining_splits)
     }
 
-    /// Returns a `Node::Values<N>` for `total_splits` using the given `values`.
-    fn values_from_vec(total_splits: u8, values: Vec<T>) -> Self {
-        match total_splits {
-            1 => Self::values_from_vec_impl(values, Self::Values2),
-            2 => Self::values_from_vec_impl(values, Self::Values4),
-            3 => Self::values_from_vec_impl(values, Self::Values8),
-            4 => Self::values_from_vec_impl(values, Self::Values16),
-            5 => Self::values_from_vec_impl(values, Self::Values32),
-            6 => Self::values_from_vec_impl(values, Self::Values64),
+    /// Returns a `Node::Values<N>` using the given `values`.
+    fn values_from_vec(values: Vec<T>) -> Self {
+        match values.len() {
+            2 => Self::values_from_vec_impl(values, Self::Values2),
+            4 => Self::values_from_vec_impl(values, Self::Values4),
+            8 => Self::values_from_vec_impl(values, Self::Values8),
+            16 => Self::values_from_vec_impl(values, Self::Values16),
+            32 => Self::values_from_vec_impl(values, Self::Values32),
+            64 => Self::values_from_vec_impl(values, Self::Values64),
             _ => unreachable!(),
         }
     }
@@ -135,15 +135,15 @@ impl<T> Node<T> {
             .into())
     }
 
-    /// Returns a `Node::Split<N>` for `total_splits` using the given `nodes`.
-    fn split_from_vec(total_splits: u8, nodes: Vec<Node<T>>) -> Self {
-        match total_splits {
-            1 => Self::split_from_vec_impl(nodes, Self::Split2),
-            2 => Self::split_from_vec_impl(nodes, Self::Split4),
-            3 => Self::split_from_vec_impl(nodes, Self::Split8),
-            4 => Self::split_from_vec_impl(nodes, Self::Split16),
-            5 => Self::split_from_vec_impl(nodes, Self::Split32),
-            6 => Self::split_from_vec_impl(nodes, Self::Split64),
+    /// Returns a `Node::Split<N>` using the given `nodes`.
+    fn split_from_vec(nodes: Vec<Node<T>>) -> Self {
+        match nodes.len() {
+            2 => Self::split_from_vec_impl(nodes, Self::Split2),
+            4 => Self::split_from_vec_impl(nodes, Self::Split4),
+            8 => Self::split_from_vec_impl(nodes, Self::Split8),
+            16 => Self::split_from_vec_impl(nodes, Self::Split16),
+            32 => Self::split_from_vec_impl(nodes, Self::Split32),
+            64 => Self::split_from_vec_impl(nodes, Self::Split64),
             _ => unreachable!(),
         }
     }
@@ -365,15 +365,13 @@ impl<T: Clone + PartialEq> Node<T> {
                 }
 
                 if !nodes.is_empty() {
-                    VisitMutResult::Replace(Self::split_from_vec(total_splits, nodes))
+                    VisitMutResult::Replace(Self::split_from_vec(nodes))
                 } else if !values.is_empty() {
                     match Self::value_from_values_vec(values) {
                         Ok(new_value) => {
                             VisitMutResult::Changed(Self::update_if_changed(value, new_value))
                         }
-                        Err(values) => {
-                            VisitMutResult::Replace(Self::values_from_vec(total_splits, values))
-                        }
+                        Err(values) => VisitMutResult::Replace(Self::values_from_vec(values)),
                     }
                 } else {
                     VisitMutResult::Changed(false)
@@ -452,7 +450,7 @@ impl<T: Clone + PartialEq> Node<T> {
                 }
 
                 if !nodes.is_empty() {
-                    VisitMutResult::Replace(Self::split_from_vec(total_splits, nodes))
+                    VisitMutResult::Replace(Self::split_from_vec(nodes))
                 } else if any_changed {
                     if let Some(value) = Self::value_from_values(values) {
                         // clone could technically be avoided; but tricky
