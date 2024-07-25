@@ -65,7 +65,7 @@ impl<T> Octree<T> {
         visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
     ) -> bool
     where
-        T: Clone + PartialEq,
+        T: Clone + Eq,
     {
         let mut buffer = OctreeSplitBuffer::EMPTY;
         let splits = self.extent.to_splits(&mut buffer);

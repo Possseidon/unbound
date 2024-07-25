@@ -198,7 +198,7 @@ impl<T: Clone> Node<T> {
     }
 }
 
-impl<T: PartialEq> Node<T> {
+impl<T: Eq> Node<T> {
     /// Updates `value` to `new_value` if it differes.
     ///
     /// Returns `true` if the value has to be updated.
@@ -243,7 +243,7 @@ impl<T: PartialEq> Node<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Node<T> {
+impl<T: Clone + Eq> Node<T> {
     /// Recursively visits all splits and values using the given `visitor` mutably.
     ///
     /// Returns `true` if any changes were made to the node.
