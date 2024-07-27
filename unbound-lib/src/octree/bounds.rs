@@ -22,7 +22,7 @@ impl OctreeBounds {
         }
     }
 
-    /// Constructs an [`OctreeBounds`] with [`OctreeExtent::ONE`] at the specified `pos`.
+    /// Constructs an [`OctreeBounds`] with [`OctreeExtent::ONE`] at the specified `point`.
     pub const fn from_point(point: UVec3) -> Self {
         Self {
             min: point,
