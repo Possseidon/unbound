@@ -1,8 +1,8 @@
 use std::{ops::ControlFlow, sync::Arc};
 
-use array_init::map_array_init;
+use arrayvec::ArrayVec;
 use derive_where::derive_where;
-use itertools::zip_eq;
+use itertools::{repeat_n, zip_eq};
 
 use super::{
     bounds::{OctreeBounds, OctreeBoundsSplit},
@@ -12,9 +12,6 @@ use super::{
     },
     OctreeCache, ValueOrCache,
 };
-
-// TODO: Move Cache in the Arc
-// Values<T, Cache, N> and Split<T, Cache, N> types that ignore Cache for Hash, PartialEq, Eq
 
 /// A node within an octree, either holding a value of type `T` or more [`Node`]s.
 ///
@@ -32,26 +29,26 @@ use super::{
 /// - `Split<N>` holds `N` child nodes, representing `log2(N)` splits
 /// - `Values<N>` is an optimization for `Split<N>` nodes that only hold values
 ///
-/// Arrays of nodes (and values) are stored as `Arc<[T; N]>` spread across different enum variants
-/// to avoid fat pointers, increasing the total size of [`Node`] itself. This is admittedly a bit
-/// annyoing to work with, but at least it also improves type-safety by preventing arrays of
-/// non-power-of-two sizes.
+/// Arrays of nodes (and values) are effectively stored as `Arc<[_; N]>` spread across different
+/// enum variants to avoid fat pointers, increasing the total size of [`Node`] itself. This is
+/// admittedly a bit annyoing to work with, but at least it also improves type-safety by preventing
+/// arrays of non-power-of-two sizes.
 #[derive(Clone, Debug)]
 #[derive_where(Hash, PartialEq, Eq; T)]
 pub(crate) enum Node<T, Cache> {
     Value(T),
-    Values2(Arc<[T; 2]>, #[derive_where(skip)] Cache),
-    Values4(Arc<[T; 4]>, #[derive_where(skip)] Cache),
-    Values8(Arc<[T; 8]>, #[derive_where(skip)] Cache),
-    Values16(Arc<[T; 16]>, #[derive_where(skip)] Cache),
-    Values32(Arc<[T; 32]>, #[derive_where(skip)] Cache),
-    Values64(Arc<[T; 64]>, #[derive_where(skip)] Cache),
-    Split2(Arc<[Self; 2]>, #[derive_where(skip)] Cache),
-    Split4(Arc<[Self; 4]>, #[derive_where(skip)] Cache),
-    Split8(Arc<[Self; 8]>, #[derive_where(skip)] Cache),
-    Split16(Arc<[Self; 16]>, #[derive_where(skip)] Cache),
-    Split32(Arc<[Self; 32]>, #[derive_where(skip)] Cache),
-    Split64(Arc<[Self; 64]>, #[derive_where(skip)] Cache),
+    Values2(Arc<Values<2, T, Cache>>),
+    Values4(Arc<Values<4, T, Cache>>),
+    Values8(Arc<Values<8, T, Cache>>),
+    Values16(Arc<Values<16, T, Cache>>),
+    Values32(Arc<Values<32, T, Cache>>),
+    Values64(Arc<Values<64, T, Cache>>),
+    Split2(Arc<Split<2, T, Cache>>),
+    Split4(Arc<Split<4, T, Cache>>),
+    Split8(Arc<Split<8, T, Cache>>),
+    Split16(Arc<Split<16, T, Cache>>),
+    Split32(Arc<Split<32, T, Cache>>),
+    Split64(Arc<Split<64, T, Cache>>),
 }
 
 impl<T, Cache> Node<T, Cache> {
@@ -67,18 +64,18 @@ impl<T, Cache> Node<T, Cache> {
         } else if visitor.node(OctreeNode::new(bounds, self))?.is_enter() {
             match self {
                 Self::Value(_) => unreachable!(),
-                Self::Values2(values, _) => Self::visit_values(visitor, bounds, splits, values),
-                Self::Values4(values, _) => Self::visit_values(visitor, bounds, splits, values),
-                Self::Values8(values, _) => Self::visit_values(visitor, bounds, splits, values),
-                Self::Values16(values, _) => Self::visit_values(visitor, bounds, splits, values),
-                Self::Values32(values, _) => Self::visit_values(visitor, bounds, splits, values),
-                Self::Values64(values, _) => Self::visit_values(visitor, bounds, splits, values),
-                Self::Split2(nodes, _) => Self::visit_split(visitor, bounds, splits, nodes),
-                Self::Split4(nodes, _) => Self::visit_split(visitor, bounds, splits, nodes),
-                Self::Split8(nodes, _) => Self::visit_split(visitor, bounds, splits, nodes),
-                Self::Split16(nodes, _) => Self::visit_split(visitor, bounds, splits, nodes),
-                Self::Split32(nodes, _) => Self::visit_split(visitor, bounds, splits, nodes),
-                Self::Split64(nodes, _) => Self::visit_split(visitor, bounds, splits, nodes),
+                Self::Values2(values) => Self::visit_values(visitor, bounds, splits, values),
+                Self::Values4(values) => Self::visit_values(visitor, bounds, splits, values),
+                Self::Values8(values) => Self::visit_values(visitor, bounds, splits, values),
+                Self::Values16(values) => Self::visit_values(visitor, bounds, splits, values),
+                Self::Values32(values) => Self::visit_values(visitor, bounds, splits, values),
+                Self::Values64(values) => Self::visit_values(visitor, bounds, splits, values),
+                Self::Split2(split) => Self::visit_split(visitor, bounds, splits, split),
+                Self::Split4(split) => Self::visit_split(visitor, bounds, splits, split),
+                Self::Split8(split) => Self::visit_split(visitor, bounds, splits, split),
+                Self::Split16(split) => Self::visit_split(visitor, bounds, splits, split),
+                Self::Split32(split) => Self::visit_split(visitor, bounds, splits, split),
+                Self::Split64(split) => Self::visit_split(visitor, bounds, splits, split),
             }
         } else {
             ControlFlow::Continue(())
@@ -90,11 +87,11 @@ impl<T, Cache> Node<T, Cache> {
         visitor: &mut V,
         bounds: OctreeBounds,
         splits: &[OctreeSplits],
-        values: &[T; N],
+        values: &Values<N, T, Cache>,
     ) -> ControlFlow<V::Break> {
         zip_eq(
             bounds.split(*splits.last().expect("splits should not be empty")),
-            values,
+            &values.values,
         )
         .try_for_each(|(split_bounds, value)| visitor.value(OctreeValue::new(split_bounds, value)))
     }
@@ -104,10 +101,10 @@ impl<T, Cache> Node<T, Cache> {
         visitor: &mut V,
         bounds: OctreeBounds,
         splits: &[OctreeSplits],
-        nodes: &[Self; N],
+        split: &Split<N, T, Cache>,
     ) -> ControlFlow<V::Break> {
         let (bounds_split, remaining_splits) = Self::next_splits(bounds, splits);
-        zip_eq(bounds_split, nodes).try_for_each(|(split_bounds, node)| {
+        zip_eq(bounds_split, &split.nodes).try_for_each(|(split_bounds, node)| {
             node.visit(visitor, split_bounds, remaining_splits)
         })
     }
@@ -124,7 +121,7 @@ impl<T, Cache> Node<T, Cache> {
     }
 
     /// Returns a `Node::Values<N>` using the given `values`.
-    fn values_from_vec(values: Vec<T>) -> Self
+    fn values_from_vec(values: SplitVec<T>) -> Self
     where
         Cache: OctreeCache<T>,
     {
@@ -141,22 +138,20 @@ impl<T, Cache> Node<T, Cache> {
 
     /// Returns a `Node::Values<N>` via `new` using the given `values`.
     fn values_from_vec_impl<const N: usize>(
-        values: Vec<T>,
-        new: fn(Arc<[T; N]>, Cache) -> Self,
+        values: SplitVec<T>,
+        new: fn(Arc<Values<N, T, Cache>>) -> Self,
     ) -> Self
     where
         Cache: OctreeCache<T>,
     {
-        let cache = Cache::compute_cache(values.iter().map(ValueOrCache::Value));
-        let values = <Box<[T; N]>>::try_from(values.into_boxed_slice())
-            .ok()
-            .expect("values should have correct len")
-            .into();
-        new(values, cache)
+        new(Arc::new(Values {
+            cache: Cache::compute_cache(values.iter().map(ValueOrCache::Value)),
+            values: array_init::from_iter(values).expect("values should have correct len"),
+        }))
     }
 
     /// Returns a `Node::Split<N>` using the given `nodes`.
-    fn split_from_vec(nodes: Vec<Self>) -> Self
+    fn split_from_vec(nodes: SplitVec<Self>) -> Self
     where
         Cache: OctreeCache<T>,
     {
@@ -173,18 +168,16 @@ impl<T, Cache> Node<T, Cache> {
 
     /// Returns a `Node::Split<N>` via `new` using the given `nodes`.
     fn split_from_vec_impl<const N: usize>(
-        nodes: Vec<Self>,
-        new: fn(Arc<[Self; N]>, Cache) -> Self,
+        nodes: SplitVec<Self>,
+        new: fn(Arc<Split<N, T, Cache>>) -> Self,
     ) -> Self
     where
         Cache: OctreeCache<T>,
     {
-        let cache = Cache::compute_cache(nodes.iter().map(Self::value_or_cache));
-        let nodes = <Box<[Self; N]>>::try_from(nodes.into_boxed_slice())
-            .ok()
-            .expect("nodes should have correct len")
-            .into();
-        new(nodes, cache)
+        new(Arc::new(Split {
+            cache: Cache::compute_cache(nodes.iter().map(Self::value_or_cache)),
+            nodes: array_init::from_iter(nodes).expect("nodes should have correct len"),
+        }))
     }
 
     /// If the node holds a single value, returns that value.
@@ -201,18 +194,18 @@ impl<T, Cache> Node<T, Cache> {
     pub(crate) fn value_or_cache(&self) -> ValueOrCache<T, Cache> {
         match self {
             Self::Value(value) => ValueOrCache::Value(value),
-            Self::Values2(_, cache)
-            | Self::Values4(_, cache)
-            | Self::Values8(_, cache)
-            | Self::Values16(_, cache)
-            | Self::Values32(_, cache)
-            | Self::Values64(_, cache)
-            | Self::Split2(_, cache)
-            | Self::Split4(_, cache)
-            | Self::Split8(_, cache)
-            | Self::Split16(_, cache)
-            | Self::Split32(_, cache)
-            | Self::Split64(_, cache) => ValueOrCache::Cache(cache),
+            Self::Values2(values) => ValueOrCache::Cache(&values.cache),
+            Self::Values4(values) => ValueOrCache::Cache(&values.cache),
+            Self::Values8(values) => ValueOrCache::Cache(&values.cache),
+            Self::Values16(values) => ValueOrCache::Cache(&values.cache),
+            Self::Values32(values) => ValueOrCache::Cache(&values.cache),
+            Self::Values64(values) => ValueOrCache::Cache(&values.cache),
+            Self::Split2(split) => ValueOrCache::Cache(&split.cache),
+            Self::Split4(split) => ValueOrCache::Cache(&split.cache),
+            Self::Split8(split) => ValueOrCache::Cache(&split.cache),
+            Self::Split16(split) => ValueOrCache::Cache(&split.cache),
+            Self::Split32(split) => ValueOrCache::Cache(&split.cache),
+            Self::Split64(split) => ValueOrCache::Cache(&split.cache),
         }
     }
 
@@ -244,25 +237,21 @@ impl<T, Cache> Node<T, Cache> {
     /// Panics if the length of `nodes` does not match `new` or if there is any non-[`Node::Value`].
     fn values_from_nodes<const N: usize>(
         nodes: &[Self],
-        new: fn(Arc<[T; N]>, Cache) -> Self,
+        new: fn(Arc<Values<N, T, Cache>>) -> Self,
     ) -> Self
     where
         T: Clone,
         Cache: OctreeCache<T>,
     {
-        let cache = Cache::compute_cache(nodes.iter().map(Self::value_or_cache));
-        let node = Arc::new(map_array_init(
-            nodes.try_into().expect("nodes should have the correct len"),
-            |node| {
-                if let Self::Value(value) = node {
-                    // clone could technically be avoided; but tricky
-                    value.clone()
-                } else {
-                    panic!("all nodes should be values")
-                }
-            },
-        ));
-        new(node, cache)
+        new(Arc::new(Values {
+            cache: Cache::compute_cache(nodes.iter().map(Self::value_or_cache)),
+            values: array_init::from_iter(
+                nodes
+                    .iter()
+                    .map(|node| node.value().expect("all nodes should be values").clone()),
+            )
+            .expect("nodes should have correct len"),
+        }))
     }
 
     /// Returns a reference to the first value if all values are the same.
@@ -314,24 +303,18 @@ impl<T, Cache> Node<T, Cache> {
         } else if visitor.node(OctreeNodeMut::new(bounds, self))?.is_enter() {
             let (control_flow, node) = match self {
                 Self::Value(value) => Self::visit_value_mut(visitor, bounds, splits, value),
-                Self::Values2(values, _) => Self::visit_values_mut(visitor, bounds, splits, values),
-                Self::Values4(values, _) => Self::visit_values_mut(visitor, bounds, splits, values),
-                Self::Values8(values, _) => Self::visit_values_mut(visitor, bounds, splits, values),
-                Self::Values16(values, _) => {
-                    Self::visit_values_mut(visitor, bounds, splits, values)
-                }
-                Self::Values32(values, _) => {
-                    Self::visit_values_mut(visitor, bounds, splits, values)
-                }
-                Self::Values64(values, _) => {
-                    Self::visit_values_mut(visitor, bounds, splits, values)
-                }
-                Self::Split2(nodes, _) => Self::visit_split_mut(visitor, bounds, splits, nodes),
-                Self::Split4(nodes, _) => Self::visit_split_mut(visitor, bounds, splits, nodes),
-                Self::Split8(nodes, _) => Self::visit_split_mut(visitor, bounds, splits, nodes),
-                Self::Split16(nodes, _) => Self::visit_split_mut(visitor, bounds, splits, nodes),
-                Self::Split32(nodes, _) => Self::visit_split_mut(visitor, bounds, splits, nodes),
-                Self::Split64(nodes, _) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+                Self::Values2(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+                Self::Values4(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+                Self::Values8(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+                Self::Values16(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+                Self::Values32(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+                Self::Values64(values) => Self::visit_values_mut(visitor, bounds, splits, values),
+                Self::Split2(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+                Self::Split4(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+                Self::Split8(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+                Self::Split16(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+                Self::Split32(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
+                Self::Split64(nodes) => Self::visit_split_mut(visitor, bounds, splits, nodes),
             };
             if let Some(node) = node {
                 *self = node;
@@ -374,7 +357,7 @@ impl<T, Cache> Node<T, Cache> {
         visitor: &mut V,
         bounds: OctreeBounds,
         splits: &[OctreeSplits],
-        values: &mut Arc<[T; N]>,
+        values: &mut Arc<Values<N, T, Cache>>,
     ) -> (ControlFlow<V::Break>, Option<Self>)
     where
         T: Clone + Eq,
@@ -383,20 +366,18 @@ impl<T, Cache> Node<T, Cache> {
         let (&last_splits, remaining_splits) =
             splits.split_last().expect("splits should not be empty");
         let bounds_split = bounds.split(last_splits);
-        let total_count = 1 << last_splits.total();
 
         let mut control_flow = ControlFlow::Continue(());
-        let mut nodes = Vec::new();
+        let mut nodes = SplitVec::new();
         for (index, split_bounds) in bounds_split.enumerate() {
-            let mut node = Self::Value(values[index].clone());
+            let mut node = Self::Value(values.values[index].clone());
             control_flow = node.visit_mut(visitor, split_bounds, remaining_splits);
             if !nodes.is_empty() {
                 nodes.push(node);
             } else if let Self::Value(new_value) = node {
-                Arc::make_mut(values)[index] = new_value;
+                Arc::make_mut(values).values[index] = new_value;
             } else {
-                nodes.reserve_exact(total_count);
-                nodes.extend(values[..index].iter().cloned().map(Self::Value));
+                nodes.extend(values.values[..index].iter().cloned().map(Self::Value));
                 nodes.push(node);
             }
             if control_flow.is_break() {
@@ -405,10 +386,15 @@ impl<T, Cache> Node<T, Cache> {
         }
 
         let node = if !nodes.is_empty() {
-            nodes.extend(values[nodes.len()..].iter().cloned().map(Self::Value));
+            nodes.extend(
+                values.values[nodes.len()..]
+                    .iter()
+                    .cloned()
+                    .map(Self::Value),
+            );
             Some(Self::split_from_vec(nodes))
         } else {
-            Self::value_from_values(&**values).map(|value| Self::Value(value.clone()))
+            Self::value_from_values(&values.values).map(|value| Self::Value(value.clone()))
         };
 
         (control_flow, node)
@@ -418,7 +404,7 @@ impl<T, Cache> Node<T, Cache> {
         visitor: &mut V,
         bounds: OctreeBounds,
         splits: &[OctreeSplits],
-        nodes: &mut Arc<[Self; N]>,
+        split: &mut Arc<Split<N, T, Cache>>,
     ) -> (ControlFlow<V::Break>, Option<Self>)
     where
         T: Clone + Eq,
@@ -428,15 +414,14 @@ impl<T, Cache> Node<T, Cache> {
             splits.split_last().expect("splits should not be empty");
         let bounds_split = bounds.split(last_splits);
 
-        let control_flow =
-            zip_eq(bounds_split, Arc::make_mut(nodes)).try_for_each(|(split_bounds, node)| {
-                node.visit_mut(visitor, split_bounds, remaining_splits)
-            });
+        let control_flow = zip_eq(bounds_split, &mut Arc::make_mut(split).nodes).try_for_each(
+            |(split_bounds, node)| node.visit_mut(visitor, split_bounds, remaining_splits),
+        );
 
-        let node = if let Some(value) = Self::value_from_nodes(&**nodes) {
+        let node = if let Some(value) = Self::value_from_nodes(&split.nodes) {
             Some(Self::Value(value.clone()))
         } else {
-            Self::values_if_all_value(&**nodes)
+            Self::values_if_all_value(&split.nodes)
         };
 
         (control_flow, node)
@@ -447,6 +432,22 @@ impl<T: Default, Cache> Default for Node<T, Cache> {
     fn default() -> Self {
         Self::Value(Default::default())
     }
+}
+
+#[derive(Clone, Debug)]
+#[derive_where(Hash, PartialEq, Eq; T)]
+pub(crate) struct Values<const N: usize, T, Cache> {
+    values: [T; N],
+    #[derive_where(skip)]
+    cache: Cache,
+}
+
+#[derive(Clone, Debug)]
+#[derive_where(Hash, PartialEq, Eq; T)]
+pub(crate) struct Split<const N: usize, T, Cache> {
+    nodes: [Node<T, Cache>; N],
+    #[derive_where(skip)]
+    cache: Cache,
 }
 
 struct NodeBuilder<'a, T, Cache> {
@@ -478,8 +479,8 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
                                 count: 1,
                             };
                         } else {
-                            let mut values = Vec::with_capacity(self.total_count);
-                            values.resize(*count, self.original.clone());
+                            let mut values = SplitVec::new_const();
+                            values.extend(repeat_n(self.original, *count).cloned());
                             values.push(value);
                             self.state = NodeBuilderState::Values(values);
                         }
@@ -487,8 +488,8 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
                         *count += 1;
                     }
                 } else {
-                    let mut nodes = Vec::with_capacity(self.total_count);
-                    nodes.resize_with(*count, || Node::Value(self.original.clone()));
+                    let mut nodes = SplitVec::new_const();
+                    nodes.extend(repeat_n(self.original, *count).cloned().map(Node::Value));
                     nodes.push(node);
                     self.state = NodeBuilderState::Nodes(nodes);
                 }
@@ -496,16 +497,16 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
             NodeBuilderState::Value { current, count } => {
                 if let Node::Value(value) = node {
                     if value != *current {
-                        let mut values = Vec::with_capacity(self.total_count);
-                        values.resize_with(*count, || current.clone());
+                        let mut values = SplitVec::new_const();
+                        values.extend(repeat_n(&*current, *count).cloned());
                         values.push(value);
                         self.state = NodeBuilderState::Values(values);
                     } else {
                         *count += 1;
                     }
                 } else {
-                    let mut nodes = Vec::with_capacity(self.total_count);
-                    nodes.resize_with(*count, || Node::Value(current.clone()));
+                    let mut nodes = SplitVec::new_const();
+                    nodes.extend(repeat_n(&*current, *count).cloned().map(Node::Value));
                     nodes.push(node);
                     self.state = NodeBuilderState::Nodes(nodes);
                 }
@@ -514,7 +515,7 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
                 if let Node::Value(value) = node {
                     values.push(value);
                 } else {
-                    let mut nodes = Vec::with_capacity(self.total_count);
+                    let mut nodes = SplitVec::new_const();
                     nodes.extend(values.drain(..).map(Node::Value));
                     nodes.push(node);
                     self.state = NodeBuilderState::Nodes(nodes);
@@ -535,18 +536,21 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
                 if count == self.total_count {
                     Some(Node::Value(current))
                 } else {
-                    let mut values = Vec::with_capacity(self.total_count);
-                    values.resize_with(count, || current.clone());
-                    values.resize_with(self.total_count, || self.original.clone());
+                    let mut values = SplitVec::new_const();
+                    values.extend(repeat_n(current, count));
+                    let remaining = self.total_count - values.len();
+                    values.extend(repeat_n(self.original, remaining).cloned());
                     Some(Node::values_from_vec(values))
                 }
             }
             NodeBuilderState::Values(mut values) => {
-                values.resize_with(self.total_count, || self.original.clone());
+                let remaining = self.total_count - values.len();
+                values.extend(repeat_n(self.original, remaining).cloned());
                 Some(Node::values_from_vec(values))
             }
             NodeBuilderState::Nodes(mut nodes) => {
-                nodes.resize_with(self.total_count, || Node::Value(self.original.clone()));
+                let remaining = self.total_count - nodes.len();
+                nodes.extend(repeat_n(self.original, remaining).cloned().map(Node::Value));
                 Some(Node::split_from_vec(nodes))
             }
         }
@@ -556,6 +560,9 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
 enum NodeBuilderState<T, Cache> {
     Unchanged { count: usize },
     Value { current: T, count: usize },
-    Values(Vec<T>),
-    Nodes(Vec<Node<T, Cache>>),
+    Values(SplitVec<T>),
+    Nodes(SplitVec<Node<T, Cache>>),
 }
+
+/// An [`ArrayVec`] capable of holding up to the maximum number of splits in a [`Node`].
+type SplitVec<T> = ArrayVec<T, 64>;
