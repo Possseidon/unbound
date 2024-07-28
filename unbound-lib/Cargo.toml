@@ -7,6 +7,7 @@ edition = "2021"
 array-init.workspace = true
 arrayvec.workspace = true
 bitvec.workspace = true
+derive-where.workspace = true
 enum-map.workspace = true
 enumset.workspace = true
 glam.workspace = true

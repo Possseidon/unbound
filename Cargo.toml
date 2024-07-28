@@ -8,9 +8,10 @@ array-init = "2.1.0"
 arrayvec = "0.7.4"
 # bevy = "0.13.2"
 bitvec = "1.0.1"
+derive-where = "1.2.7"
 enum-map = "2.7.3"
 enumset = "1.1.4"
-glam = "0.25.0"      # bevy is still on 0.25.0
+glam = "0.25.0"        # bevy is still on 0.25.0
 itertools = "0.13.0"
 
 unbound-lib = { path = "unbound-lib" }

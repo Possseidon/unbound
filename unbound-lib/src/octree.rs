@@ -3,9 +3,10 @@ pub mod extent;
 mod node;
 pub mod visit;
 
-use bounds::OctreeBounds;
+use std::ops::ControlFlow;
+
+use derive_where::derive_where;
 use extent::{OctreeExtent, OctreeSplitBuffer};
-use glam::UVec3;
 use node::Node;
 use visit::{OctreeVisitor, OctreeVisitorMut};
 
@@ -19,19 +20,19 @@ use visit::{OctreeVisitor, OctreeVisitorMut};
 /// `2x1x1`. Note, that the subdivision layout is not stored within each node, but instead is
 /// calculated on the fly when traversing the octree (based on the full extent of the octree).
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
-pub struct Octree<T> {
-    /// The root node of the octree.
-    root: Node<T>,
+pub struct Octree<T, Cache = NoCache> {
     /// The extent of the octree.
     extent: OctreeExtent,
+    /// The root node of the octree.
+    root: Node<T, Cache>,
 }
 
-impl<T> Octree<T> {
+impl<T, Cache> Octree<T, Cache> {
     /// Wraps the provided `value` in an [`Octree`] with the specified `extent`.
-    pub const fn new(value: T, extent: OctreeExtent) -> Self {
+    pub const fn new(extent: OctreeExtent, value: T) -> Self {
         Self {
-            root: Node::Value(value),
             extent,
+            root: Node::Value(value),
         }
     }
 
@@ -40,35 +41,102 @@ impl<T> Octree<T> {
     where
         T: Default,
     {
-        Self::new(T::default(), extent)
+        Self::new(extent, T::default())
     }
 
-    /// The extent of this octree.
+    /// The extent of the [`Octree`].
     pub fn extent(&self) -> OctreeExtent {
         self.extent
     }
 
-    /// Traverses the octree with the given `visitor`.
-    ///
-    /// This is the base-primitive for all immutable octree operations.
-    pub fn visit(&self, visitor: &mut impl OctreeVisitor<Value = T, Bounds = OctreeBounds>) {
+    /// If the [`Octree`] holds a single value, returns that value.
+    pub fn value(&self) -> Option<&T> {
+        self.root.value()
+    }
+
+    /// If the [`Octree`] holds multiple values, returns the cached value.
+    pub fn cache(&self) -> Option<&Cache> {
+        self.root.cache()
+    }
+
+    /// Returns the (possibly cached) value of the [`Octree`].
+    pub fn value_or_cache(&self) -> ValueOrCache<T, Cache> {
+        self.root.value_or_cache()
+    }
+
+    /// Fills the [`Octree`] with the given value.
+    pub fn fill(&mut self, value: T) {
+        self.root = Node::Value(value);
+    }
+
+    /// Traverses the [`Octree`] immutably in a depth-first manner.
+    pub fn visit<V: OctreeVisitor<Value = T, Cache = Cache>>(
+        &self,
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break> {
         let mut buffer = OctreeSplitBuffer::EMPTY;
         let splits = self.extent.to_splits(&mut buffer);
         self.root.visit(visitor, self.extent.into(), splits)
     }
 
-    /// Traverses the octree with the given `visitor` and returns `true` if it was modified.
-    ///
-    /// This is the base-primitive for all mutable octree operations.
-    pub fn visit_mut(
+    /// Traverses the [`Octree`] mutably in a depth-first manner.
+    pub fn visit_mut<V: OctreeVisitorMut<Value = T, Cache = Cache>>(
         &mut self,
-        visitor: &mut impl OctreeVisitorMut<Value = T, Bounds = OctreeBounds, Pos = UVec3>,
-    ) -> bool
+        visitor: &mut V,
+    ) -> ControlFlow<V::Break>
     where
         T: Clone + Eq,
+        Cache: Clone + OctreeCache<T>,
     {
         let mut buffer = OctreeSplitBuffer::EMPTY;
         let splits = self.extent.to_splits(&mut buffer);
         self.root.visit_mut(visitor, self.extent.into(), splits)
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive_where(Clone, Copy)]
+pub enum ValueOrCache<'a, T, Cache> {
+    Value(&'a T),
+    Cache(&'a Cache),
+}
+
+impl<'a, T, Cache> ValueOrCache<'a, T, Cache> {
+    pub fn value(self) -> Option<&'a T> {
+        if let ValueOrCache::Value(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn cache(self) -> Option<&'a Cache> {
+        if let ValueOrCache::Cache(cache) = self {
+            Some(cache)
+        } else {
+            None
+        }
+    }
+}
+
+pub trait OctreeCache<T>: Sized {
+    // TODO: Add single extent parameter, so that the elements in `values` can be used.
+    //       -> All values always have the same extent.
+    fn compute_cache<'a>(values: impl Iterator<Item = ValueOrCache<'a, T, Self>>) -> Self
+    where
+        Self: 'a,
+        T: 'a;
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NoCache;
+
+impl<T> OctreeCache<T> for NoCache {
+    fn compute_cache<'a>(_values: impl Iterator<Item = ValueOrCache<'a, T, Self>>) -> Self
+    where
+        Self: 'a,
+        T: 'a,
+    {
+        Self
     }
 }
