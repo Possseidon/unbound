@@ -120,9 +120,10 @@ impl<'a, T, Cache> ValueOrCache<'a, T, Cache> {
 }
 
 pub trait OctreeCache<T>: Sized {
-    // TODO: Add single extent parameter, so that the elements in `values` can be used.
-    //       -> All values always have the same extent.
-    fn compute_cache<'a>(values: impl Iterator<Item = ValueOrCache<'a, T, Self>>) -> Self
+    fn compute_cache<'a>(
+        values: impl Iterator<Item = ValueOrCache<'a, T, Self>>,
+        value_extent: OctreeExtent,
+    ) -> Self
     where
         Self: 'a,
         T: 'a;
@@ -132,7 +133,10 @@ pub trait OctreeCache<T>: Sized {
 pub struct NoCache;
 
 impl<T> OctreeCache<T> for NoCache {
-    fn compute_cache<'a>(_values: impl Iterator<Item = ValueOrCache<'a, T, Self>>) -> Self
+    fn compute_cache<'a>(
+        _values: impl Iterator<Item = ValueOrCache<'a, T, Self>>,
+        _value_extent: OctreeExtent,
+    ) -> Self
     where
         Self: 'a,
         T: 'a,

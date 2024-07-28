@@ -6,7 +6,7 @@ use itertools::{repeat_n, zip_eq};
 
 use super::{
     bounds::{OctreeBounds, OctreeBoundsSplit},
-    extent::OctreeSplits,
+    extent::{OctreeExtent, OctreeSplits},
     visit::{
         OctreeNode, OctreeNodeMut, OctreePointMut, OctreeValue, OctreeVisitor, OctreeVisitorMut,
     },
@@ -121,17 +121,17 @@ impl<T, Cache> Node<T, Cache> {
     }
 
     /// Returns a `Node::Values<N>` using the given `values`.
-    fn values_from_vec(values: SplitVec<T>) -> Self
+    fn values_from_vec(values: SplitVec<T>, value_extent: OctreeExtent) -> Self
     where
         Cache: OctreeCache<T>,
     {
         match values.len() {
-            2 => Self::values_from_vec_impl(values, Self::Values2),
-            4 => Self::values_from_vec_impl(values, Self::Values4),
-            8 => Self::values_from_vec_impl(values, Self::Values8),
-            16 => Self::values_from_vec_impl(values, Self::Values16),
-            32 => Self::values_from_vec_impl(values, Self::Values32),
-            64 => Self::values_from_vec_impl(values, Self::Values64),
+            2 => Self::values_from_vec_impl(values, value_extent, Self::Values2),
+            4 => Self::values_from_vec_impl(values, value_extent, Self::Values4),
+            8 => Self::values_from_vec_impl(values, value_extent, Self::Values8),
+            16 => Self::values_from_vec_impl(values, value_extent, Self::Values16),
+            32 => Self::values_from_vec_impl(values, value_extent, Self::Values32),
+            64 => Self::values_from_vec_impl(values, value_extent, Self::Values64),
             _ => unreachable!(),
         }
     }
@@ -139,29 +139,30 @@ impl<T, Cache> Node<T, Cache> {
     /// Returns a `Node::Values<N>` via `new` using the given `values`.
     fn values_from_vec_impl<const N: usize>(
         values: SplitVec<T>,
+        value_extent: OctreeExtent,
         new: fn(Arc<Values<N, T, Cache>>) -> Self,
     ) -> Self
     where
         Cache: OctreeCache<T>,
     {
         new(Arc::new(Values {
-            cache: Cache::compute_cache(values.iter().map(ValueOrCache::Value)),
+            cache: Cache::compute_cache(values.iter().map(ValueOrCache::Value), value_extent),
             values: array_init::from_iter(values).expect("values should have correct len"),
         }))
     }
 
     /// Returns a `Node::Split<N>` using the given `nodes`.
-    fn split_from_vec(nodes: SplitVec<Self>) -> Self
+    fn split_from_vec(nodes: SplitVec<Self>, value_extent: OctreeExtent) -> Self
     where
         Cache: OctreeCache<T>,
     {
         match nodes.len() {
-            2 => Self::split_from_vec_impl(nodes, Self::Split2),
-            4 => Self::split_from_vec_impl(nodes, Self::Split4),
-            8 => Self::split_from_vec_impl(nodes, Self::Split8),
-            16 => Self::split_from_vec_impl(nodes, Self::Split16),
-            32 => Self::split_from_vec_impl(nodes, Self::Split32),
-            64 => Self::split_from_vec_impl(nodes, Self::Split64),
+            2 => Self::split_from_vec_impl(nodes, value_extent, Self::Split2),
+            4 => Self::split_from_vec_impl(nodes, value_extent, Self::Split4),
+            8 => Self::split_from_vec_impl(nodes, value_extent, Self::Split8),
+            16 => Self::split_from_vec_impl(nodes, value_extent, Self::Split16),
+            32 => Self::split_from_vec_impl(nodes, value_extent, Self::Split32),
+            64 => Self::split_from_vec_impl(nodes, value_extent, Self::Split64),
             _ => unreachable!(),
         }
     }
@@ -169,13 +170,14 @@ impl<T, Cache> Node<T, Cache> {
     /// Returns a `Node::Split<N>` via `new` using the given `nodes`.
     fn split_from_vec_impl<const N: usize>(
         nodes: SplitVec<Self>,
+        value_extent: OctreeExtent,
         new: fn(Arc<Split<N, T, Cache>>) -> Self,
     ) -> Self
     where
         Cache: OctreeCache<T>,
     {
         new(Arc::new(Split {
-            cache: Cache::compute_cache(nodes.iter().map(Self::value_or_cache)),
+            cache: Cache::compute_cache(nodes.iter().map(Self::value_or_cache), value_extent),
             nodes: array_init::from_iter(nodes).expect("nodes should have correct len"),
         }))
     }
@@ -210,19 +212,19 @@ impl<T, Cache> Node<T, Cache> {
     }
 
     /// Returns a `Node::Values<N>` if all nodes contain a single [`Node::Value`].
-    fn values_if_all_value(nodes: &[Self]) -> Option<Self>
+    fn values_if_all_value(nodes: &[Self], value_extent: OctreeExtent) -> Option<Self>
     where
         T: Clone,
         Cache: OctreeCache<T>,
     {
         if nodes.iter().all(|node| matches!(node, Self::Value(_))) {
             Some(match nodes.len() {
-                2 => Self::values_from_nodes(nodes, Self::Values2),
-                4 => Self::values_from_nodes(nodes, Self::Values4),
-                8 => Self::values_from_nodes(nodes, Self::Values8),
-                16 => Self::values_from_nodes(nodes, Self::Values16),
-                32 => Self::values_from_nodes(nodes, Self::Values32),
-                64 => Self::values_from_nodes(nodes, Self::Values64),
+                2 => Self::values_from_nodes(nodes, value_extent, Self::Values2),
+                4 => Self::values_from_nodes(nodes, value_extent, Self::Values4),
+                8 => Self::values_from_nodes(nodes, value_extent, Self::Values8),
+                16 => Self::values_from_nodes(nodes, value_extent, Self::Values16),
+                32 => Self::values_from_nodes(nodes, value_extent, Self::Values32),
+                64 => Self::values_from_nodes(nodes, value_extent, Self::Values64),
                 _ => unreachable!(),
             })
         } else {
@@ -237,6 +239,7 @@ impl<T, Cache> Node<T, Cache> {
     /// Panics if the length of `nodes` does not match `new` or if there is any non-[`Node::Value`].
     fn values_from_nodes<const N: usize>(
         nodes: &[Self],
+        value_extent: OctreeExtent,
         new: fn(Arc<Values<N, T, Cache>>) -> Self,
     ) -> Self
     where
@@ -244,7 +247,7 @@ impl<T, Cache> Node<T, Cache> {
         Cache: OctreeCache<T>,
     {
         new(Arc::new(Values {
-            cache: Cache::compute_cache(nodes.iter().map(Self::value_or_cache)),
+            cache: Cache::compute_cache(nodes.iter().map(Self::value_or_cache), value_extent),
             values: array_init::from_iter(
                 nodes
                     .iter()
@@ -350,7 +353,7 @@ impl<T, Cache> Node<T, Cache> {
             }
         }
 
-        (control_flow, builder.build())
+        (control_flow, builder.build(bounds_split.extent()))
     }
 
     fn visit_values_mut<const N: usize, V: OctreeVisitorMut<Value = T, Cache = Cache>>(
@@ -392,7 +395,7 @@ impl<T, Cache> Node<T, Cache> {
                     .cloned()
                     .map(Self::Value),
             );
-            Some(Self::split_from_vec(nodes))
+            Some(Self::split_from_vec(nodes, bounds_split.extent()))
         } else {
             Self::value_from_values(&values.values).map(|value| Self::Value(value.clone()))
         };
@@ -421,7 +424,7 @@ impl<T, Cache> Node<T, Cache> {
         let node = if let Some(value) = Self::value_from_nodes(&split.nodes) {
             Some(Self::Value(value.clone()))
         } else {
-            Self::values_if_all_value(&split.nodes)
+            Self::values_if_all_value(&split.nodes, bounds_split.extent())
         };
 
         (control_flow, node)
@@ -525,7 +528,7 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
         }
     }
 
-    fn build(self) -> Option<Node<T, Cache>>
+    fn build(self, value_extent: OctreeExtent) -> Option<Node<T, Cache>>
     where
         T: Clone,
         Cache: OctreeCache<T>,
@@ -540,18 +543,18 @@ impl<'a, T, Cache> NodeBuilder<'a, T, Cache> {
                     values.extend(repeat_n(current, count));
                     let remaining = self.total_count - values.len();
                     values.extend(repeat_n(self.original, remaining).cloned());
-                    Some(Node::values_from_vec(values))
+                    Some(Node::values_from_vec(values, value_extent))
                 }
             }
             NodeBuilderState::Values(mut values) => {
                 let remaining = self.total_count - values.len();
                 values.extend(repeat_n(self.original, remaining).cloned());
-                Some(Node::values_from_vec(values))
+                Some(Node::values_from_vec(values, value_extent))
             }
             NodeBuilderState::Nodes(mut nodes) => {
                 let remaining = self.total_count - nodes.len();
                 nodes.extend(repeat_n(self.original, remaining).cloned().map(Node::Value));
-                Some(Node::split_from_vec(nodes))
+                Some(Node::split_from_vec(nodes, value_extent))
             }
         }
     }

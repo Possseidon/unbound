@@ -117,6 +117,16 @@ pub struct OctreeBoundsSplit {
 }
 
 impl OctreeBoundsSplit {
+    /// The origin (point with smallest x, y and z) of the outer bounds that are to be split.
+    pub fn origin(self) -> UVec3 {
+        self.origin
+    }
+
+    /// The extent of the inner bounds that are yielded.
+    pub fn extent(self) -> OctreeExtent {
+        self.extent
+    }
+
     /// Unpacks a compact index into a [`UVec3`].
     fn unpack_index(mut self) -> [u8; 3] {
         let x = self.index & ((1 << self.x_splits) - 1);
