@@ -307,7 +307,7 @@ mod tests {
             let planes = mc.planes(corners);
             assert_eq!(
                 planes.is_empty(),
-                corners == Corners3::EMPTY || corners == Corners3::ALL,
+                corners.is_empty() || corners == Corners3::all(),
                 "only empty or full cubes have no planes",
             );
             for plane in planes {
