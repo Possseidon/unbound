@@ -102,7 +102,7 @@ impl IBounds3 {
             && (self.min.z <= point.z && point.z <= self.max.z)
     }
 
-    /// Whether the bounds fully encloses `other`.
+    /// Whether the bounds fully enclose `other`.
     ///
     /// Inclusive, so an [`IBounds3`] always encloses itself.
     pub const fn encloses(self, other: Self) -> bool {

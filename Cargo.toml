@@ -13,7 +13,6 @@ enum-map = "2.7.3"
 enumset = "1.1.4"
 glam = "0.25.0"        # bevy is still on 0.25.0
 itertools = "0.13.0"
-replace_with = "0.1.7"
 
 unbound-lib = { path = "unbound-lib" }
 unbound-shared = { path = "unbound-shared" }
