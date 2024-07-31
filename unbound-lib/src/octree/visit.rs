@@ -1,69 +1,64 @@
 use std::ops::ControlFlow;
 
-use derive_where::derive_where;
 use glam::UVec3;
 
-use super::{
-    bounds::OctreeBounds, extent::OctreeExtent, node::Node, Octree, OctreeCache, ValueOrCache,
-};
+use super::{bounds::OctreeBounds, extent::OctreeExtent, node::Node, Octree, OctreeNode};
 
 /// Contains callbacks for [`Octree`] traversal.
 ///
-/// - [`OctreeVisitor::value`] is called for areas that contain a single value.
-/// - [`OctreeVisitor::node`] is called for areas that contain multiple different values.
-///
 /// This trait could work for both DFS or BFS, but [`Octree::visit`] uses DFS.
 pub trait OctreeVisitor {
-    /// The value type; i.e. `T` in [`Octree<T>`].
-    type Value;
+    /// The type of value that leaf nodes hold; i.e. `T` in [`Octree<T>`].
+    type Leaf;
 
-    /// The type of cached values; i.e. `Cache` in [`Octree<T, Cache>`].
+    /// The type of extra data that parent nodes hold; i.e. `P` in [`Octree<T, P>`].
+    type Parent;
+
+    /// The type of cached values on parent nodes; i.e. `C` in [`Octree<T, P, C>`].
     type Cache;
 
     /// The type within the [`ControlFlow::Break`] used to break visitation.
     type Break;
 
-    /// Called for areas within the [`Octree`] that contain a single value.
-    fn value(&mut self, value: OctreeValue<Self::Value>) -> ControlFlow<Self::Break>;
+    /// Called for leaf nodes within the [`Octree`].
+    fn leaf(&mut self, leaf: LeafRef<Self::Leaf>) -> ControlFlow<Self::Break>;
 
-    /// Called for areas within the [`Octree`] that contain multiple different values.
+    /// Called for parent nodes within the [`Octree`].
     ///
-    /// Return [`VisitNode::Enter`] to enter the area, resulting in further callbacks.
-    fn node(
+    /// Return [`VisitParent::Enter`] to enter the node, resulting in further callbacks.
+    fn parent(
         &mut self,
-        node: OctreeNode<Self::Value, Self::Cache>,
-    ) -> ControlFlow<Self::Break, VisitNode>;
+        parent: ParentRef<Self::Leaf, Self::Parent, Self::Cache>,
+    ) -> ControlFlow<Self::Break, VisitParent>;
 }
 
-/// Immutable access to an area within an [`Octree`] that contains a single value.
-#[derive(Debug)]
-#[derive_where(Clone, Copy)]
-pub struct OctreeValue<'a, T> {
-    /// The location of the value within the [`Octree`].
+/// Immutable access to a leaf node within an [`Octree`].
+pub struct LeafRef<'a, T> {
+    /// The location of the leaf within the [`Octree`].
     bounds: OctreeBounds,
-    /// A reference to the value in the [`Octree`].
-    value: &'a T,
+    /// A reference to the value of this leaf.
+    leaf: &'a T,
 }
 
-impl<'a, T> OctreeValue<'a, T> {
-    pub(crate) fn new(bounds: OctreeBounds, value: &'a T) -> Self {
-        Self { bounds, value }
+impl<'a, T> LeafRef<'a, T> {
+    pub(crate) fn new(bounds: OctreeBounds, leaf: &'a T) -> Self {
+        Self { bounds, leaf }
     }
 
-    /// The area within the [`Octree`] that this value covers.
+    /// The area within the [`Octree`] that this leaf covers.
     pub fn bounds(self) -> OctreeBounds {
         self.bounds
     }
 
-    /// The value in the [`Octree`].
-    pub fn value(self) -> &'a T {
-        self.value
+    /// The value of this leaf.
+    pub fn leaf(self) -> &'a T {
+        self.leaf
     }
 
-    /// Clones the area into an owned [`Octree`].
+    /// Clones the leaf into an owned [`Octree`].
     ///
     /// The [`From`] trait can also be used.
-    pub fn into_octree<Cache>(self) -> Octree<T, Cache>
+    pub fn into_octree<P, C>(self) -> Octree<T, P, C>
     where
         T: Clone,
     {
@@ -71,61 +66,55 @@ impl<'a, T> OctreeValue<'a, T> {
     }
 }
 
-impl<T: Clone, Cache> From<OctreeValue<'_, T>> for Octree<T, Cache> {
-    fn from(octree: OctreeValue<T>) -> Self {
+impl<T: Clone, P, C> From<LeafRef<'_, T>> for Octree<T, P, C> {
+    fn from(octree: LeafRef<T>) -> Self {
         Self {
-            root: Node::Value(octree.value.clone()),
+            root: Node::Leaf(octree.leaf.clone()),
             extent: octree.bounds.extent(),
         }
     }
 }
 
-/// An immutable reference to a non-leaf node in an [`Octree`].
-#[derive(Debug)]
-#[derive_where(Clone, Copy)]
-pub struct OctreeNode<'a, T, Cache> {
-    /// The location of the node within the [`Octree`].
+/// An immutable reference to a parent node in an [`Octree`].
+pub struct ParentRef<'a, T, P, C> {
+    /// The location of the parent node within the [`Octree`].
     bounds: OctreeBounds,
-    /// The referenced node in the [`Octree`].
+    /// The referenced parent node in the [`Octree`].
     ///
-    /// Never [`Node::Value`], since [`OctreeValue`] handles that case.
-    node: &'a Node<T, Cache>,
+    /// Never [`Node::Leaf`], since [`LeafRef`] handles that case.
+    node: &'a Node<T, P, C>,
 }
 
-impl<'a, T, Cache> OctreeNode<'a, T, Cache> {
-    pub(crate) fn new(bounds: OctreeBounds, node: &'a Node<T, Cache>) -> Self {
+impl<'a, T, P, C> ParentRef<'a, T, P, C> {
+    pub(crate) fn new(bounds: OctreeBounds, node: &'a Node<T, P, C>) -> Self {
         Self { bounds, node }
     }
 
-    /// The area within the [`Octree`] that this node covers.
+    /// The area within the [`Octree`] that this parent node covers.
     pub fn bounds(self) -> OctreeBounds {
         self.bounds
     }
 
-    /// The cached value for this area in the [`Octree`].
-    pub fn cache(self) -> &'a Cache
-    where
-        Cache: Clone + OctreeCache<T>,
-    {
-        self.node.cache().expect("node should not be a value")
+    /// The data on this parent node.
+    pub fn parent(self) -> &'a P {
+        self.node.get().parent().expect("should be a parent node")
     }
 
-    /// Clones the area into an owned [`Octree`].
+    /// Clones the parent node into an owned [`Octree`].
     ///
     /// The [`From`] trait can also be used.
     ///
     /// Cloning is always cheap due to nodes being stored in [`Arc`](std::sync::Arc)s.
-    pub fn into_octree(self) -> Octree<T, Cache>
+    pub fn into_octree(self) -> Octree<T, P, C>
     where
         T: Clone,
-        Cache: Clone,
     {
         self.into()
     }
 }
 
-impl<T: Clone, Cache: Clone> From<OctreeNode<'_, T, Cache>> for Octree<T, Cache> {
-    fn from(octree: OctreeNode<T, Cache>) -> Self {
+impl<T: Clone, P, C> From<ParentRef<'_, T, P, C>> for Octree<T, P, C> {
+    fn from(octree: ParentRef<T, P, C>) -> Self {
         Self {
             root: octree.node.clone(),
             extent: octree.bounds.extent(),
@@ -135,60 +124,62 @@ impl<T: Clone, Cache: Clone> From<OctreeNode<'_, T, Cache>> for Octree<T, Cache>
 
 /// Contains callbacks for [`Octree`] traversal and modification.
 ///
-/// - [`OctreeVisitorMut::point`] is called for single points.
-/// - [`OctreeVisitorMut::node`] is called for areas covering multiple points.
-///
 /// This trait could work for both DFS or BFS, but [`Octree::visit_mut`] uses DFS.
 pub trait OctreeVisitorMut {
-    /// The value type; i.e. `T` in [`Octree<T>`].
-    type Value;
+    /// The type of value that leaf nodes hold; i.e. `T` in [`Octree<T>`].
+    type Leaf;
 
-    /// The type of cached values; i.e. `Cache` in [`Octree<T, Cache>`].
+    /// The type of extra data that parent nodes hold; i.e. `P` in [`Octree<T, P>`].
+    type Parent;
+
+    /// The type of cached values on parent nodes; i.e. `C` in [`Octree<T, P, C>`].
     type Cache;
 
     /// The type within the [`ControlFlow::Break`] used to break visitation.
     type Break;
 
-    /// Called for single points within the [`Octree`].
-    fn point(&mut self, value: OctreePointMut<Self::Value>) -> ControlFlow<Self::Break>;
+    /// Called for leaf nodes that cover a single point within the [`Octree`].
+    fn point(&mut self, point: PointMut<Self::Leaf>) -> ControlFlow<Self::Break>;
 
-    /// Called for areas covering multiple points within the [`Octree`].
+    /// Called for parent nodes within the [`Octree`].
     ///
-    /// Return [`VisitNode::Enter`] to enter the area, resulting in further callbacks.
-    fn node(
+    /// Return [`VisitParent::Enter`] to enter the node, resulting in further callbacks.
+    fn parent(
         &mut self,
-        node: OctreeNodeMut<Self::Value, Self::Cache>,
-    ) -> ControlFlow<Self::Break, VisitNode>;
+        node: NodeMut<Self::Leaf, Self::Parent, Self::Cache>,
+    ) -> ControlFlow<Self::Break, VisitParent>;
+
+    /// Called if [`OctreeVisitorMut::parent`] returns [`VisitParent::Enter`] on a leaf node.
+    fn split(&mut self, leaf: LeafRef<Self::Leaf>) -> Self::Parent;
 }
 
-/// A mutable reference to a single point within an [`Octree`].
-#[derive(Debug)]
-pub struct OctreePointMut<'a, T> {
-    /// The location of the point within the [`Octree`].
+/// A mutable reference to a leaf node that covers a single point within an [`Octree`].
+pub struct PointMut<'a, T> {
+    /// The location of the leaf within the [`Octree`].
     point: UVec3,
-    /// A mutable reference to the value in the [`Octree`].
-    value: &'a mut T,
+    /// A mutable reference to the value of this leaf.
+    leaf: &'a mut T,
 }
 
-impl<'a, T> OctreePointMut<'a, T> {
-    pub(crate) fn new(point: UVec3, value: &'a mut T) -> Self {
-        Self { point, value }
+impl<'a, T> PointMut<'a, T> {
+    pub(crate) fn new(point: UVec3, leaf: &'a mut T) -> Self {
+        Self { point, leaf }
     }
 
-    /// The location of the point within the [`Octree`].
+    /// The point within the [`Octree`] that this leaf is located at.
     pub fn point(&self) -> UVec3 {
         self.point
     }
 
-    /// A mutable reference to the value in the [`Octree`].
-    pub fn value(&mut self) -> &mut T {
-        self.value
+    /// A mutable reference to the value of this leaf.
+    pub fn leaf(&mut self) -> &mut T {
+        self.leaf
     }
 
-    /// Clones the area into an owned [`Octree`].
+    /// Clones the leaf into an owned [`Octree`].
     ///
     /// The [`From`] trait can also be used.
-    pub fn into_octree<Cache>(&self) -> Octree<T, Cache>
+    pub fn into_octree<P, C>(&self) -> Octree<T, P, C>
     where
         T: Clone,
     {
@@ -196,26 +187,25 @@ impl<'a, T> OctreePointMut<'a, T> {
     }
 }
 
-impl<T: Clone, Cache> From<&OctreePointMut<'_, T>> for Octree<T, Cache> {
-    fn from(octree: &OctreePointMut<T>) -> Self {
+impl<T: Clone, P, C> From<&PointMut<'_, T>> for Octree<T, P, C> {
+    fn from(octree: &PointMut<T>) -> Self {
         Self {
-            root: Node::Value(octree.value.clone()),
+            root: Node::Leaf(octree.leaf.clone()),
             extent: OctreeExtent::ONE,
         }
     }
 }
 
-/// A mutable reference to an area within an [`Octree`] that covers multiple points.
-#[derive(Debug)]
-pub struct OctreeNodeMut<'a, T, Cache> {
+/// A mutable reference to a non-point node in an [`Octree`].
+pub struct NodeMut<'a, T, P, C> {
     /// The location of the node within the [`Octree`].
     bounds: OctreeBounds,
-    /// A mutable reference to the node in the [`Octree`].
-    node: &'a mut Node<T, Cache>,
+    /// The referenced node in the [`Octree`].
+    node: &'a mut Node<T, P, C>,
 }
 
-impl<'a, T, Cache> OctreeNodeMut<'a, T, Cache> {
-    pub(crate) fn new(bounds: OctreeBounds, node: &'a mut Node<T, Cache>) -> Self {
+impl<'a, T, P, C> NodeMut<'a, T, P, C> {
+    pub(crate) fn new(bounds: OctreeBounds, node: &'a mut Node<T, P, C>) -> Self {
         Self { bounds, node }
     }
 
@@ -224,30 +214,14 @@ impl<'a, T, Cache> OctreeNodeMut<'a, T, Cache> {
         self.bounds
     }
 
-    /// The value for this area in the [`Octree`].
-    pub fn value(&'a self) -> Option<&'a T> {
-        self.node.value()
+    /// Returns an immutable reference to the contents of the node.
+    pub fn get(&self) -> OctreeNode<T, P, C> {
+        self.node.get()
     }
 
-    /// The cached value for this area in the [`Octree`].
-    pub fn cache(&self) -> Option<&Cache>
-    where
-        Cache: Clone + OctreeCache<T>,
-    {
-        self.node.cache()
-    }
-
-    /// The (possibly cached) value for this area in the [`Octree`].
-    pub fn value_or_cache(&self) -> ValueOrCache<T, Cache> {
-        self.node.value_or_cache()
-    }
-
-    /// Fills the entire area with the given value.
-    pub fn fill(&mut self, value: T)
-    where
-        T: Eq,
-    {
-        *self.node = Node::Value(value);
+    /// Returns the leaf value of this node if it is a leaf node.
+    pub fn as_leaf(&mut self) -> Option<&mut T> {
+        self.node.leaf_mut()
     }
 
     /// Replaces the entire area with the given `octree`.
@@ -255,12 +229,24 @@ impl<'a, T, Cache> OctreeNodeMut<'a, T, Cache> {
     /// # Panics
     ///
     /// Panics if the extent of the given `octree` doesn't match.
-    pub fn set(&mut self, octree: Octree<T, Cache>)
-    where
-        T: Eq,
-    {
+    pub fn set(&mut self, octree: Octree<T, P, C>) {
         assert!(self.bounds.extent() == octree.extent);
         *self.node = octree.root;
+    }
+
+    /// Clears the node, replacing it with the single given `leaf` value.
+    pub fn fill(&mut self, leaf: T) {
+        *self.node = Node::Leaf(leaf);
+    }
+
+    /// Returns the parent data of this node if it is a parent node.
+    pub fn as_parent(&mut self) -> Option<&mut P>
+    where
+        T: Clone,
+        P: Clone,
+        C: Clone,
+    {
+        self.node.parent_mut()
     }
 
     /// Clones the area into an owned [`Octree`].
@@ -268,17 +254,16 @@ impl<'a, T, Cache> OctreeNodeMut<'a, T, Cache> {
     /// The [`From`] trait can also be used.
     ///
     /// Cloning is always cheap due to nodes being stored in [`Arc`](std::sync::Arc)s.
-    pub fn into_octree(&self) -> Octree<T, Cache>
+    pub fn into_octree(&self) -> Octree<T, P, C>
     where
         T: Clone,
-        Cache: Clone,
     {
         self.into()
     }
 }
 
-impl<T: Clone, Cache: Clone> From<&OctreeNodeMut<'_, T, Cache>> for Octree<T, Cache> {
-    fn from(octree: &OctreeNodeMut<T, Cache>) -> Self {
+impl<T: Clone, P, C> From<&NodeMut<'_, T, P, C>> for Octree<T, P, C> {
+    fn from(octree: &NodeMut<T, P, C>) -> Self {
         Self {
             root: octree.node.clone(),
             extent: octree.bounds.extent(),
@@ -288,18 +273,20 @@ impl<T: Clone, Cache: Clone> From<&OctreeNodeMut<'_, T, Cache>> for Octree<T, Ca
 
 /// [`Octree`] control flow for nodes that can be entered.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum VisitNode {
+pub enum VisitParent {
     /// Skips over this node without entering it.
     Skip,
     /// Enters this node, causing additional calls on the visitor.
     Enter,
 }
 
-impl VisitNode {
+impl VisitParent {
+    /// Whether the parent's child nodes should be skipped.
     pub fn is_skip(&self) -> bool {
         matches!(self, Self::Skip)
     }
 
+    /// Whether the parent's child nodes should be entered.
     pub fn is_enter(&self) -> bool {
         matches!(self, Self::Enter)
     }
