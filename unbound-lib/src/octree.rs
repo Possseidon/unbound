@@ -10,7 +10,7 @@ use extent::{OctreeExtent, OctreeSplitBuffer};
 use node::Node;
 use visit::{OctreeVisitor, OctreeVisitorMut};
 
-/// An octree storing values of type `T` with side lengths that must be powers of two.
+/// An octree with leaves of type `T` with side lengths that must be powers of two.
 ///
 /// Unlike with normal octrees, the side lengths do not have to be equal. In fact, this type can be
 /// used perfectly fine as a quadtree as well.
@@ -19,24 +19,32 @@ use visit::{OctreeVisitor, OctreeVisitorMut};
 /// usually result in subdivisions of size `4x4x4`, but could also be e.g. `8x8x1`, `2x4x8` or
 /// `2x1x1`. Note, that the subdivision layout is not stored within each node, but instead is
 /// calculated on the fly when traversing the octree (based on the full extent of the octree).
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
-pub struct Octree<T, Cache = NoCache> {
+///
+/// Parent nodes can hold arbitrary additional data of type `P` as well as an immutable cached value
+/// `C` that is calculated based on leaf nodes and other cached values.
+///
+/// TODO: Consider a custom Debug impl using visit; keep the Debug impl on Node as is for, well,
+/// debugging purposes, but don't actually use it
+#[derive_where(Clone; T)]
+#[derive(Debug)]
+#[derive_where(Hash, PartialEq, Eq; T, P)]
+pub struct Octree<T, P = (), C = ()> {
     /// The extent of the octree.
     extent: OctreeExtent,
     /// The root node of the octree.
-    root: Node<T, Cache>,
+    root: Node<T, P, C>,
 }
 
-impl<T, Cache> Octree<T, Cache> {
-    /// Wraps the provided `value` in an [`Octree`] with the specified `extent`.
-    pub const fn new(extent: OctreeExtent, value: T) -> Self {
+impl<T, P, C> Octree<T, P, C> {
+    /// Wraps the provided `leaf` value in an [`Octree`] with the specified `extent`.
+    pub const fn new(extent: OctreeExtent, leaf: T) -> Self {
         Self {
             extent,
-            root: Node::Value(value),
+            root: Node::Leaf(leaf),
         }
     }
 
-    /// Constructs an [`Octree`] with the specified `extent` filled by the [`Default`] value of `T`.
+    /// Wraps the [`Default`] value of `T` in an [`Octree`] with the specified `extent`.
     pub fn with_default(extent: OctreeExtent) -> Self
     where
         T: Default,
@@ -49,28 +57,20 @@ impl<T, Cache> Octree<T, Cache> {
         self.extent
     }
 
-    /// If the [`Octree`] holds a single value, returns that value.
-    pub fn value(&self) -> Option<&T> {
-        self.root.value()
+    /// Provides direct access to the root node of the octree.
+    ///
+    /// See [`Self::visit`] and [`Self::visit_mut`] for full traversal.
+    pub fn root(&self) -> OctreeNode<T, P, C> {
+        self.root.get()
     }
 
-    /// If the [`Octree`] holds multiple values, returns the cached value.
-    pub fn cache(&self) -> Option<&Cache> {
-        self.root.cache()
-    }
-
-    /// Returns the (possibly cached) value of the [`Octree`].
-    pub fn value_or_cache(&self) -> ValueOrCache<T, Cache> {
-        self.root.value_or_cache()
-    }
-
-    /// Fills the [`Octree`] with the given value.
-    pub fn fill(&mut self, value: T) {
-        self.root = Node::Value(value);
+    /// Clears the [`Octree`], replacing it with the single given `leaf` value.
+    pub fn fill(&mut self, leaf: T) {
+        self.root = Node::Leaf(leaf);
     }
 
     /// Traverses the [`Octree`] immutably in a depth-first manner.
-    pub fn visit<V: OctreeVisitor<Value = T, Cache = Cache>>(
+    pub fn visit<V: OctreeVisitor<Leaf = T, Parent = P, Cache = C>>(
         &self,
         visitor: &mut V,
     ) -> ControlFlow<V::Break> {
@@ -80,13 +80,14 @@ impl<T, Cache> Octree<T, Cache> {
     }
 
     /// Traverses the [`Octree`] mutably in a depth-first manner.
-    pub fn visit_mut<V: OctreeVisitorMut<Value = T, Cache = Cache>>(
+    pub fn visit_mut<V: OctreeVisitorMut<Leaf = T, Parent = P, Cache = C>>(
         &mut self,
         visitor: &mut V,
     ) -> ControlFlow<V::Break>
     where
         T: Clone + Eq,
-        Cache: Clone + OctreeCache<T>,
+        P: Clone,
+        C: Clone + OctreeCache<T>,
     {
         let mut buffer = OctreeSplitBuffer::EMPTY;
         let splits = self.extent.to_splits(&mut buffer);
@@ -94,53 +95,95 @@ impl<T, Cache> Octree<T, Cache> {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+/// An immutable reference to the values of a node in an [`Octree`].
+///
+/// Intentionally does _not_ implement [`Eq`] and friends, since it is unclear as to whether that
+/// should include cache or not.
+#[derive(Debug)]
 #[derive_where(Clone, Copy)]
-pub enum ValueOrCache<'a, T, Cache> {
-    Value(&'a T),
-    Cache(&'a Cache),
+pub enum OctreeNode<'a, T, P, C> {
+    Leaf(&'a T),
+    Parent { parent: &'a P, cache: &'a C },
 }
 
-impl<'a, T, Cache> ValueOrCache<'a, T, Cache> {
-    pub fn value(self) -> Option<&'a T> {
-        if let ValueOrCache::Value(value) = self {
-            Some(value)
+impl<'a, T, P, C> OctreeNode<'a, T, P, C> {
+    /// Whether this is a leaf node.
+    pub fn is_leaf(self) -> bool {
+        matches!(self, Self::Leaf(_))
+    }
+
+    /// Returns the value of a leaf node.
+    pub fn leaf(self) -> Option<&'a T> {
+        if let Self::Leaf(leaf) = self {
+            Some(leaf)
         } else {
             None
         }
     }
 
-    pub fn cache(self) -> Option<&'a Cache> {
-        if let ValueOrCache::Cache(cache) = self {
+    /// Whether this is a parent node.
+    pub fn is_parent(self) -> bool {
+        matches!(self, Self::Parent { .. })
+    }
+
+    /// Returns the value of the parent node.
+    pub fn parent(self) -> Option<&'a P> {
+        if let Self::Parent { parent, .. } = self {
+            Some(parent)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the cached value of a parent node.
+    pub fn cache(self) -> Option<&'a C> {
+        if let Self::Parent { cache, .. } = self {
             Some(cache)
         } else {
             None
         }
     }
+
+    /// Returns both parent value and cached value of a parent node.
+    pub fn parent_and_cache(self) -> Option<(&'a P, &'a C)> {
+        if let Self::Parent { parent, cache } = self {
+            Some((parent, cache))
+        } else {
+            None
+        }
+    }
 }
 
+/// A value used to cache leaf related properties in an octree.
 pub trait OctreeCache<T>: Sized {
+    /// Computes a cached value from leaf values `T` and already cached values of parent nodes.
+    ///
+    /// `child_extent` is usually used as a sort of multiplier for leaf values. E.g. to cache the
+    /// number of set bits in an octree of bools, you would count `true` not just as `1` but as the
+    /// volume of the `child_extent`.
     fn compute_cache<'a>(
-        values: impl Iterator<Item = ValueOrCache<'a, T, Self>>,
-        value_extent: OctreeExtent,
+        children: impl ExactSizeIterator<Item = LeafOrCache<'a, T, Self>>,
+        child_extent: OctreeExtent,
     ) -> Self
     where
-        Self: 'a,
-        T: 'a;
+        T: 'a,
+        Self: 'a;
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NoCache;
+/// A reference to either a leaf value `T` or a cached value `C`.
+pub enum LeafOrCache<'a, T, C> {
+    Leaf(&'a T),
+    Cache(&'a C),
+}
 
-impl<T> OctreeCache<T> for NoCache {
+impl<T> OctreeCache<T> for () {
     fn compute_cache<'a>(
-        _values: impl Iterator<Item = ValueOrCache<'a, T, Self>>,
-        _value_extent: OctreeExtent,
+        _children: impl ExactSizeIterator<Item = LeafOrCache<'a, T, Self>>,
+        _child_extent: OctreeExtent,
     ) -> Self
     where
-        Self: 'a,
         T: 'a,
+        Self: 'a,
     {
-        Self
     }
 }
