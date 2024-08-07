@@ -2,9 +2,9 @@ use std::ops::ControlFlow;
 
 use glam::UVec3;
 
-use super::{bounds::OctreeBounds, extent::OctreeExtent, node::Node, Octree, OctreeNode};
+use super::{bounds::OctreeBounds, extent::OctreeExtent, node::Node, OctreeChunk, OctreeNode};
 
-/// Contains callbacks for [`Octree`] traversal.
+/// Contains callbacks for [`OctreeChunk`] traversal.
 ///
 /// This trait could work for both DFS or BFS, but [`Octree::visit`] uses DFS.
 pub trait OctreeVisitor {
@@ -20,10 +20,10 @@ pub trait OctreeVisitor {
     /// The type within the [`ControlFlow::Break`] used to break visitation.
     type Break;
 
-    /// Called for leaf nodes within the [`Octree`].
+    /// Called for leaf nodes within the [`OctreeChunk`].
     fn leaf(&mut self, leaf: LeafRef<Self::Leaf>) -> ControlFlow<Self::Break>;
 
-    /// Called for parent nodes within the [`Octree`].
+    /// Called for parent nodes within the [`OctreeChunk`].
     ///
     /// Return [`VisitParent::Enter`] to enter the node, resulting in further callbacks.
     fn parent(
@@ -32,9 +32,9 @@ pub trait OctreeVisitor {
     ) -> ControlFlow<Self::Break, VisitParent>;
 }
 
-/// Immutable access to a leaf node within an [`Octree`].
+/// Immutable access to a leaf node within an [`OctreeChunk`].
 pub struct LeafRef<'a, T> {
-    /// The location of the leaf within the [`Octree`].
+    /// The location of the leaf within the [`OctreeChunk`].
     bounds: OctreeBounds,
     /// A reference to the value of this leaf.
     leaf: &'a T,
@@ -45,7 +45,7 @@ impl<'a, T> LeafRef<'a, T> {
         Self { bounds, leaf }
     }
 
-    /// The area within the [`Octree`] that this leaf covers.
+    /// The area within the [`OctreeChunk`] that this leaf covers.
     pub fn bounds(self) -> OctreeBounds {
         self.bounds
     }
@@ -55,10 +55,10 @@ impl<'a, T> LeafRef<'a, T> {
         self.leaf
     }
 
-    /// Clones the leaf into an owned [`Octree`].
+    /// Clones the leaf into an owned [`OctreeChunk`].
     ///
     /// The [`From`] trait can also be used.
-    pub fn into_octree<P, C>(self) -> Octree<T, P, C>
+    pub fn into_octree<P, C>(self) -> OctreeChunk<T, P, C>
     where
         T: Clone,
     {
@@ -66,7 +66,7 @@ impl<'a, T> LeafRef<'a, T> {
     }
 }
 
-impl<T: Clone, P, C> From<LeafRef<'_, T>> for Octree<T, P, C> {
+impl<T: Clone, P, C> From<LeafRef<'_, T>> for OctreeChunk<T, P, C> {
     fn from(octree: LeafRef<T>) -> Self {
         Self {
             root: Node::Leaf(octree.leaf.clone()),
@@ -75,11 +75,11 @@ impl<T: Clone, P, C> From<LeafRef<'_, T>> for Octree<T, P, C> {
     }
 }
 
-/// An immutable reference to a parent node in an [`Octree`].
+/// An immutable reference to a parent node in an [`OctreeChunk`].
 pub struct ParentRef<'a, T, P, C> {
-    /// The location of the parent node within the [`Octree`].
+    /// The location of the parent node within the [`OctreeChunk`].
     bounds: OctreeBounds,
-    /// The referenced parent node in the [`Octree`].
+    /// The referenced parent node in the [`OctreeChunk`].
     ///
     /// Never [`Node::Leaf`], since [`LeafRef`] handles that case.
     node: &'a Node<T, P, C>,
@@ -90,7 +90,7 @@ impl<'a, T, P, C> ParentRef<'a, T, P, C> {
         Self { bounds, node }
     }
 
-    /// The area within the [`Octree`] that this parent node covers.
+    /// The area within the [`OctreeChunk`] that this parent node covers.
     pub fn bounds(self) -> OctreeBounds {
         self.bounds
     }
@@ -100,12 +100,12 @@ impl<'a, T, P, C> ParentRef<'a, T, P, C> {
         self.node.get().parent().expect("should be a parent node")
     }
 
-    /// Clones the parent node into an owned [`Octree`].
+    /// Clones the parent node into an owned [`OctreeChunk`].
     ///
     /// The [`From`] trait can also be used.
     ///
     /// Cloning is always cheap due to nodes being stored in [`Arc`](std::sync::Arc)s.
-    pub fn into_octree(self) -> Octree<T, P, C>
+    pub fn into_octree(self) -> OctreeChunk<T, P, C>
     where
         T: Clone,
     {
@@ -113,7 +113,7 @@ impl<'a, T, P, C> ParentRef<'a, T, P, C> {
     }
 }
 
-impl<T: Clone, P, C> From<ParentRef<'_, T, P, C>> for Octree<T, P, C> {
+impl<T: Clone, P, C> From<ParentRef<'_, T, P, C>> for OctreeChunk<T, P, C> {
     fn from(octree: ParentRef<T, P, C>) -> Self {
         Self {
             root: octree.node.clone(),
@@ -122,7 +122,7 @@ impl<T: Clone, P, C> From<ParentRef<'_, T, P, C>> for Octree<T, P, C> {
     }
 }
 
-/// Contains callbacks for [`Octree`] traversal and modification.
+/// Contains callbacks for [`OctreeChunk`] traversal and modification.
 ///
 /// This trait could work for both DFS or BFS, but [`Octree::visit_mut`] uses DFS.
 pub trait OctreeVisitorMut {
@@ -138,10 +138,10 @@ pub trait OctreeVisitorMut {
     /// The type within the [`ControlFlow::Break`] used to break visitation.
     type Break;
 
-    /// Called for leaf nodes that cover a single point within the [`Octree`].
+    /// Called for leaf nodes that cover a single point within the [`OctreeChunk`].
     fn point(&mut self, point: PointMut<Self::Leaf>) -> ControlFlow<Self::Break>;
 
-    /// Called for parent nodes within the [`Octree`].
+    /// Called for parent nodes within the [`OctreeChunk`].
     ///
     /// Return [`VisitParent::Enter`] to enter the node, resulting in further callbacks.
     fn parent(
@@ -153,9 +153,9 @@ pub trait OctreeVisitorMut {
     fn split(&mut self, leaf: LeafRef<Self::Leaf>) -> Self::Parent;
 }
 
-/// A mutable reference to a leaf node that covers a single point within an [`Octree`].
+/// A mutable reference to a leaf node that covers a single point within an [`OctreeChunk`].
 pub struct PointMut<'a, T> {
-    /// The location of the leaf within the [`Octree`].
+    /// The location of the leaf within the [`OctreeChunk`].
     point: UVec3,
     /// A mutable reference to the value of this leaf.
     leaf: &'a mut T,
@@ -166,7 +166,7 @@ impl<'a, T> PointMut<'a, T> {
         Self { point, leaf }
     }
 
-    /// The point within the [`Octree`] that this leaf is located at.
+    /// The point within the [`OctreeChunk`] that this leaf is located at.
     pub fn point(&self) -> UVec3 {
         self.point
     }
@@ -176,10 +176,10 @@ impl<'a, T> PointMut<'a, T> {
         self.leaf
     }
 
-    /// Clones the leaf into an owned [`Octree`].
+    /// Clones the leaf into an owned [`OctreeChunk`].
     ///
     /// The [`From`] trait can also be used.
-    pub fn into_octree<P, C>(&self) -> Octree<T, P, C>
+    pub fn into_octree<P, C>(&self) -> OctreeChunk<T, P, C>
     where
         T: Clone,
     {
@@ -187,7 +187,7 @@ impl<'a, T> PointMut<'a, T> {
     }
 }
 
-impl<T: Clone, P, C> From<&PointMut<'_, T>> for Octree<T, P, C> {
+impl<T: Clone, P, C> From<&PointMut<'_, T>> for OctreeChunk<T, P, C> {
     fn from(octree: &PointMut<T>) -> Self {
         Self {
             root: Node::Leaf(octree.leaf.clone()),
@@ -196,11 +196,11 @@ impl<T: Clone, P, C> From<&PointMut<'_, T>> for Octree<T, P, C> {
     }
 }
 
-/// A mutable reference to a non-point node in an [`Octree`].
+/// A mutable reference to a non-point node in an [`OctreeChunk`].
 pub struct NodeMut<'a, T, P, C> {
-    /// The location of the node within the [`Octree`].
+    /// The location of the node within the [`OctreeChunk`].
     bounds: OctreeBounds,
-    /// The referenced node in the [`Octree`].
+    /// The referenced node in the [`OctreeChunk`].
     node: &'a mut Node<T, P, C>,
 }
 
@@ -209,7 +209,7 @@ impl<'a, T, P, C> NodeMut<'a, T, P, C> {
         Self { bounds, node }
     }
 
-    /// The area within the [`Octree`] that this node covers.
+    /// The area within the [`OctreeChunk`] that this node covers.
     pub fn bounds(&self) -> OctreeBounds {
         self.bounds
     }
@@ -229,7 +229,7 @@ impl<'a, T, P, C> NodeMut<'a, T, P, C> {
     /// # Panics
     ///
     /// Panics if the extent of the given `octree` doesn't match.
-    pub fn set(&mut self, octree: Octree<T, P, C>) {
+    pub fn set(&mut self, octree: OctreeChunk<T, P, C>) {
         assert!(self.bounds.extent() == octree.extent);
         *self.node = octree.root;
     }
@@ -249,12 +249,12 @@ impl<'a, T, P, C> NodeMut<'a, T, P, C> {
         self.node.parent_mut()
     }
 
-    /// Clones the area into an owned [`Octree`].
+    /// Clones the area into an owned [`OctreeChunk`].
     ///
     /// The [`From`] trait can also be used.
     ///
     /// Cloning is always cheap due to nodes being stored in [`Arc`](std::sync::Arc)s.
-    pub fn into_octree(&self) -> Octree<T, P, C>
+    pub fn into_octree(&self) -> OctreeChunk<T, P, C>
     where
         T: Clone,
     {
@@ -262,7 +262,7 @@ impl<'a, T, P, C> NodeMut<'a, T, P, C> {
     }
 }
 
-impl<T: Clone, P, C> From<&NodeMut<'_, T, P, C>> for Octree<T, P, C> {
+impl<T: Clone, P, C> From<&NodeMut<'_, T, P, C>> for OctreeChunk<T, P, C> {
     fn from(octree: &NodeMut<T, P, C>) -> Self {
         Self {
             root: octree.node.clone(),
@@ -271,7 +271,7 @@ impl<T: Clone, P, C> From<&NodeMut<'_, T, P, C>> for Octree<T, P, C> {
     }
 }
 
-/// [`Octree`] control flow for nodes that can be entered.
+/// [`OctreeChunk`] control flow for nodes that can be entered.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VisitParent {
     /// Skips over this node without entering it.

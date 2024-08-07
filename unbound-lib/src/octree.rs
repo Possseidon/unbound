@@ -28,15 +28,15 @@ use visit::{OctreeVisitor, OctreeVisitorMut};
 #[derive_where(Clone; T)]
 #[derive(Debug)]
 #[derive_where(Hash, PartialEq, Eq; T, P)]
-pub struct Octree<T, P = (), C = ()> {
+pub struct OctreeChunk<T, P = (), C = ()> {
     /// The extent of the octree.
     extent: OctreeExtent,
     /// The root node of the octree.
     root: Node<T, P, C>,
 }
 
-impl<T, P, C> Octree<T, P, C> {
-    /// Wraps the provided `leaf` value in an [`Octree`] with the specified `extent`.
+impl<T, P, C> OctreeChunk<T, P, C> {
+    /// Wraps the provided `leaf` value in an [`OctreeChunk`] with the specified `extent`.
     pub const fn new(extent: OctreeExtent, leaf: T) -> Self {
         Self {
             extent,
@@ -44,7 +44,7 @@ impl<T, P, C> Octree<T, P, C> {
         }
     }
 
-    /// Wraps the [`Default`] value of `T` in an [`Octree`] with the specified `extent`.
+    /// Wraps the [`Default`] value of `T` in an [`OctreeChunk`] with the specified `extent`.
     pub fn with_default(extent: OctreeExtent) -> Self
     where
         T: Default,
@@ -52,7 +52,7 @@ impl<T, P, C> Octree<T, P, C> {
         Self::new(extent, T::default())
     }
 
-    /// The extent of the [`Octree`].
+    /// The extent of the [`OctreeChunk`].
     pub fn extent(&self) -> OctreeExtent {
         self.extent
     }
@@ -64,12 +64,12 @@ impl<T, P, C> Octree<T, P, C> {
         self.root.get()
     }
 
-    /// Clears the [`Octree`], replacing it with the single given `leaf` value.
+    /// Clears the [`OctreeChunk`], replacing it with the single given `leaf` value.
     pub fn fill(&mut self, leaf: T) {
         self.root = Node::Leaf(leaf);
     }
 
-    /// Traverses the [`Octree`] immutably in a depth-first manner.
+    /// Traverses the [`OctreeChunk`] immutably in a depth-first manner.
     pub fn visit<V: OctreeVisitor<Leaf = T, Parent = P, Cache = C>>(
         &self,
         visitor: &mut V,
@@ -79,7 +79,7 @@ impl<T, P, C> Octree<T, P, C> {
         self.root.visit(visitor, self.extent.into(), splits)
     }
 
-    /// Traverses the [`Octree`] mutably in a depth-first manner.
+    /// Traverses the [`OctreeChunk`] mutably in a depth-first manner.
     pub fn visit_mut<V: OctreeVisitorMut<Leaf = T, Parent = P, Cache = C>>(
         &mut self,
         visitor: &mut V,
@@ -95,7 +95,7 @@ impl<T, P, C> Octree<T, P, C> {
     }
 }
 
-/// An immutable reference to the values of a node in an [`Octree`].
+/// An immutable reference to the values of a node in an [`OctreeChunk`].
 ///
 /// Intentionally does _not_ implement [`Eq`] and friends, since it is unclear as to whether that
 /// should include cache or not.
