@@ -124,7 +124,7 @@ impl Default for Version {
 }
 
 impl Display for Version {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Version::Dev(dev) => dev.fmt(f),
             Version::Release(release) => release.fmt(f),
@@ -195,7 +195,7 @@ impl Default for DevVersion {
 }
 
 impl Display for DevVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "0.{}.{}", self.minor, self.patch)
     }
 }
@@ -278,7 +278,7 @@ impl Default for ReleaseVersion {
 }
 
 impl Display for ReleaseVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
@@ -333,7 +333,7 @@ impl VersionReq {
 }
 
 impl Display for VersionReq {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, ">={}", self.min_version())
     }
 }
