@@ -21,6 +21,8 @@ impl OctreeExtent {
     /// The maximum size along each axis as log2.
     pub const MAX_SIZE_LOG2: u8 = 31;
 
+    pub const MAX_VOLUME: u128 = Self::MAX.volume();
+
     pub const fn from_size_log2(size_log2: [u8; 3]) -> Option<Self> {
         if size_log2[0] <= Self::MAX_SIZE_LOG2
             && size_log2[1] <= Self::MAX_SIZE_LOG2
@@ -77,12 +79,21 @@ impl OctreeExtent {
         )
     }
 
+    pub const fn volume(self) -> u128 {
+        let [x, y, z] = self.size_log2;
+        let total_splits = x + y + z;
+        1 << total_splits
+    }
+
     /// Calculates the optimal splits for an octree.
     ///
-    /// The outermost split will be the last item in the returned slice.
+    /// The number of splits is returned along with the buffer and the outermost split will be the
+    /// last item in the buffer.
     ///
     /// A single entry will only split up to 6 times combined throughout all axes.
-    pub fn to_splits(self, buffer: &mut OctreeSplitBuffer) -> &[OctreeSplits] {
+    pub fn to_split_list(self) -> (OctreeSplitList, u8) {
+        let mut buffer = OctreeSplitList::EMPTY;
+
         let mut index = 0;
         let mut remaining_splits = self.size_log2;
         let mut current = OctreeSplits::NONE;
@@ -112,7 +123,8 @@ impl OctreeExtent {
             index += 1;
         }
 
-        &buffer.levels[0..index]
+        // at most MAX_SPLITS, which fits in a u8
+        (buffer, index as u8)
     }
 
     /// Splits the [`OctreeExtent`] `splits` times along the corresponding axes.
@@ -172,20 +184,22 @@ impl OctreeSplits {
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub struct OctreeSplitBuffer {
-    levels: [OctreeSplits; OctreeSplitBuffer::MAX_SPLITS],
+pub struct OctreeSplitList {
+    pub levels: [OctreeSplits; Self::MAX],
 }
 
-impl OctreeSplitBuffer {
+impl OctreeSplitList {
     /// The maximum number of splits that can be stored in this buffer.
     ///
     /// This is also the maximum number of splits that are possible in total for an
     /// [`OctreeExtent::MAX`].
-    pub const MAX_SPLITS: usize = 16;
+    ///
+    /// TODO: Make sure this is used correctly. I might need some - 1 in some places
+    pub const MAX: usize = 16;
 
-    /// An empty [`OctreeSplitBuffer`] for use with [`OctreeExtent::to_splits`].
+    /// An empty [`OctreeSplitList`] for use with [`OctreeExtent::to_splits`].
     pub const EMPTY: Self = Self {
-        levels: [OctreeSplits::NONE; Self::MAX_SPLITS],
+        levels: [OctreeSplits::NONE; Self::MAX],
     };
 }
 
@@ -212,7 +226,7 @@ impl From<OctreeExtent> for OctreeExtentCompact {
 }
 
 impl std::fmt::Debug for OctreeExtentCompact {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("OctreeExtent")
             .field("size_log2", &OctreeExtent::from(*self))
             .finish()
@@ -225,16 +239,16 @@ mod tests {
 
     #[test]
     fn octree_extent_to_splits() {
-        let mut buffer = OctreeSplitBuffer::EMPTY;
-        let splits = OctreeExtent::from_size_log2([5, 10, 4])
+        let (splits, len) = OctreeExtent::from_size_log2([5, 10, 4])
             .unwrap()
-            .to_splits(&mut buffer);
+            .to_split_list();
 
-        let mut iter = splits.iter();
+        assert_eq!(len, 4);
+
+        let mut iter = splits.levels.iter();
         assert_eq!(iter.next(), Some(&OctreeSplits { splits: [2, 2, 2] }));
         assert_eq!(iter.next(), Some(&OctreeSplits { splits: [2, 2, 2] }));
         assert_eq!(iter.next(), Some(&OctreeSplits { splits: [1, 5, 0] }));
         assert_eq!(iter.next(), Some(&OctreeSplits { splits: [0, 1, 0] }));
-        assert_eq!(iter.next(), None);
     }
 }

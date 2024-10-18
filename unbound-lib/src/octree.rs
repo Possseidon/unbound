@@ -1,189 +1,321 @@
 pub mod bounds;
 pub mod extent;
-mod node;
+pub mod iter;
+pub mod iter_mut;
+pub mod iter_mut_parent;
+pub mod node;
 pub mod visit;
 
-use std::ops::ControlFlow;
+mod stack;
 
 use derive_where::derive_where;
-use extent::{OctreeExtent, OctreeSplitBuffer};
-use node::Node;
-use visit::{OctreeVisitor, OctreeVisitorMut};
+use extent::OctreeExtent;
+use iter::Iter;
+use iter_mut::IterMut;
+use visit::{Visit, VisitMut};
 
-/// An octree with leaves of type `T` with side lengths that must be powers of two.
+// TODO: Consider a custom Debug impl for octree nodes that forward to some generic implementation
+// on OctreeNode
+
+/// An owned octree node holding leaves of type [`OctreeNode::Leaf`].
 ///
 /// Unlike with normal octrees, the side lengths do not have to be equal. In fact, this type can be
 /// used perfectly fine as a quadtree as well.
 ///
 /// Octree subdivisions are not limited to `2x2x2` and instead store up to 64 child nodes. This will
 /// usually result in subdivisions of size `4x4x4`, but could also be e.g. `8x8x1`, `2x4x8` or
-/// `2x1x1`. Note, that the subdivision layout is not stored within each node, but instead is
-/// calculated on the fly when traversing the octree (based on the full extent of the octree).
+/// `2x1x1`.
 ///
-/// Parent nodes can hold arbitrary additional data of type `P` as well as an immutable cached value
-/// `C` that is calculated based on leaf nodes and other cached values.
+/// Parent nodes can hold arbitrary additional data of type [`OctreeNode::Parent`] as well as an
+/// immutable cached value of type [`OctreeNode::Cache`] which is calculated based on leaf nodes and
+/// already calculated cached values.
 ///
-/// TODO: Consider a custom Debug impl using visit; keep the Debug impl on Node as is for, well,
-/// debugging purposes, but don't actually use it
-#[derive_where(Clone; T)]
-#[derive(Debug)]
-#[derive_where(Hash, PartialEq, Eq; T, P)]
-pub struct OctreeChunk<T, P = (), C = ()> {
-    /// The extent of the octree.
-    extent: OctreeExtent,
-    /// The root node of the octree.
-    root: Node<T, P, C>,
-}
+/// Since an octree is usually made up of a lot of nodes, types implementing this trait should
+/// generally strive for a size of two pointers.
+pub trait OctreeNode: Sized {
+    /// The type of leaf values that this node can hold.
+    type Leaf: Clone + Eq;
 
-impl<T, P, C> OctreeChunk<T, P, C> {
-    /// Wraps the provided `leaf` value in an [`OctreeChunk`] with the specified `extent`.
-    pub const fn new(extent: OctreeExtent, leaf: T) -> Self {
-        Self {
-            extent,
-            root: Node::Leaf(leaf),
+    /// A reference to a leaf, usually `&Self::Leaf`.
+    ///
+    /// Allows e.g. storing [`bool`]s as single bits by using [`bool`] as `LeafRef`.
+    type LeafRef<'a>: Copy
+    where
+        Self::Leaf: 'a;
+
+    /// A mutable reference to a leaf, usually `&mut Self::Leaf`.
+    ///
+    /// Allows e.g. storing [`bool`]s as single bits by using some wrapper type to mutate.
+    type LeafMut<'a>
+    where
+        Self::Leaf: 'a;
+
+    /// Strips the mutability off of the given leaf reference.
+    fn freeze_leaf(leaf: Self::LeafMut<'_>) -> Self::LeafRef<'_>;
+
+    fn clone_leaf(leaf: Self::LeafRef<'_>) -> Self::Leaf;
+
+    fn leaf_eq(leaf: &Self::Leaf, leaf_ref: Self::LeafRef<'_>) -> bool;
+
+    /// The type of extra data that parent nodes can hold.
+    type Parent: Clone;
+
+    /// The type of cached leaf value.
+    ///
+    /// Calculated from [`OctreeNode::Leaf`] and already calculated [`OctreeNode::Cache`].
+    type Cache: Clone;
+
+    /// A reference to a cached value, usually `&Self::Cache`.
+    ///
+    /// Allows e.g. calculating the count of set [`bool`]s on the fly rather than storing it.
+    ///
+    /// There is no `CacheMut`, since cache should always be calculated via the [`OctreeCache`]
+    /// trait and never be mutated directly.
+    type CacheRef<'a>: Copy
+    where
+        Self::Cache: 'a;
+
+    /// Constructs a new [`OctreeNode`] of the specified `extent` holding just the given `leaf`.
+    fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self;
+
+    /// Construtcs a new [`OctreeNode`] of the specified `extent` with the [`Default`] leaf value.
+    fn with_default(extent: OctreeExtent) -> Self
+    where
+        Self::Leaf: Default,
+    {
+        Self::new(extent, Self::Leaf::default())
+    }
+
+    /// Returns the extent of this [`OctreeNode`].
+    fn extent(&self) -> OctreeExtent;
+
+    /// Returns a reference to the underlying data of this [`OctreeNode`].
+    ///
+    /// - For leaf nodes: [`OctreeNode::LeafRef`]
+    /// - For parent nodes: [`&OctreeNode::Parent`](OctreeNode::Parent), [`OctreeNode::CacheRef`]
+    fn as_data(&self) -> NodeDataRef<Self>;
+
+    /// Returns a reference to the underlying data of this [`OctreeNode`] with the parent mutable.
+    ///
+    /// - For leaf nodes: [`OctreeNode::LeafRef`]
+    /// - For parent nodes: [`&mut OctreeNode::Parent`](OctreeNode::Parent),
+    ///   [`OctreeNode::CacheRef`]
+    fn as_data_mut_parent(&mut self) -> NodeDataMutParent<Self>;
+
+    /// Returns a mutable reference to the underlying data of this [`OctreeNode`].
+    ///
+    /// - For leaf nodes: [`OctreeNode::LeafMut`]
+    /// - For parent nodes: [`&mut OctreeNode::Parent`](OctreeNode::Parent),
+    ///   [`OctreeNode::CacheRef`]
+    fn as_data_mut(&mut self) -> NodeDataMut<Self>;
+
+    /// Returns the node itself as a [`NodeRef`].
+    fn as_node_ref(&self) -> NodeRef<Self> {
+        if let NodeDataRef::Leaf(leaf) = self.as_data() {
+            NodeRef::Leaf(leaf)
+        } else {
+            NodeRef::Parent(ParentNodeRef(self))
         }
     }
 
-    /// Wraps the [`Default`] value of `T` in an [`OctreeChunk`] with the specified `extent`.
-    pub fn with_default(extent: OctreeExtent) -> Self
-    where
-        T: Default,
-    {
-        Self::new(extent, T::default())
+    /// Returns the node itself as a [`NodeMut`].
+    fn as_node_mut(&mut self) -> NodeMut<Self> {
+        // borrow checker forbids returning self after matching on as_data_mut
+        if self.as_data().is_leaf() {
+            let NodeDataMut::Leaf(leaf) = self.as_data_mut() else {
+                unreachable!()
+            };
+            NodeMut::Leaf(leaf)
+        } else {
+            NodeMut::Parent(ParentNodeMut(self))
+        }
     }
 
-    /// The extent of the [`OctreeChunk`].
-    pub fn extent(&self) -> OctreeExtent {
-        self.extent
-    }
-
-    /// Provides direct access to the root node of the octree.
+    /// Returns a [`NodeRef`] to one of the children of this node.
     ///
-    /// See [`Self::visit`] and [`Self::visit_mut`] for full traversal.
-    pub fn root(&self) -> OctreeNode<T, P, C> {
-        self.root.get()
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds. It will also panic if called on a leaf node, which can
+    /// be seen as a node that has zero children, therefore resulting in an "out of bounds" for any
+    /// `index` including `0`.
+    fn get_child(&self, index: u8) -> NodeRef<Self>;
+
+    /// Returns a [`NodeMut`] to one of the children of this node.
+    ///
+    /// Usually, a user should only ever hold a mutable reference to the root of an octree. Getting
+    /// mutable access to a child node can easily break the invariants of the parent node. That is
+    /// also the reason, as to why there is no `get_child_mut_parent`, since there is no easy way to
+    /// limit a `&mut self` to only have mutable access to the parent but not leaf data.
+    ///
+    /// Mutations can be done safely via e.g. [`OctreeNode::fill`] or [`OctreeNode::iter_mut`],
+    /// which can guarantee that the invariant is upheld on their own. This function should be
+    /// seen as an implementation detail and is required to implement these safe abstractions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds. It will also panic if called on a leaf node, which can
+    /// be seen as a node that has zero children, therefore resulting in an "out of bounds" for any
+    /// `index` including `0`.
+    fn get_child_mut_unchecked(&mut self, index: u8) -> NodeMut<Self>;
+
+    /// Fills the entire node with the given leaf while keeping the original extent.
+    fn fill(&mut self, leaf: Self::Leaf) {
+        *self = Self::new(self.extent(), leaf);
     }
 
-    /// Clears the [`OctreeChunk`], replacing it with the single given `leaf` value.
-    pub fn fill(&mut self, leaf: T) {
-        self.root = Node::Leaf(leaf);
+    /// Returns an iterator that traverses the nodes in the octree depth-first.
+    ///
+    /// Specific parent nodes can be skipped using [`Visit`]. This is technically not necessary,
+    /// but dramatically speeds up iteration by allowing to skip entering parent nodes.
+    ///
+    /// - Use [`AllLeaves`](visit::AllLeaves) to iterate over all leaves
+    /// - Use [`Within`](visit::Within) to skip entering nodes outside some bounds
+    ///
+    /// Custom implementations of [`Visit`] can be used for more complex scenarios.
+    fn iter(&self) -> Iter<Self> {
+        Iter::new(self)
     }
 
-    /// Traverses the [`OctreeChunk`] immutably in a depth-first manner.
-    pub fn visit<V: OctreeVisitor<Leaf = T, Parent = P, Cache = C>>(
-        &self,
-        visitor: &mut V,
-    ) -> ControlFlow<V::Break> {
-        let mut buffer = OctreeSplitBuffer::EMPTY;
-        let splits = self.extent.to_splits(&mut buffer);
-        self.root.visit(visitor, self.extent.into(), splits)
-    }
+    // fn iter_mut_parent<V: Visit<Self>>(&mut self, visit: V) -> IterMutParent<Self, V> {
+    //     IterMutParent::new(self, visit)
+    // }
 
-    /// Traverses the [`OctreeChunk`] mutably in a depth-first manner.
-    pub fn visit_mut<V: OctreeVisitorMut<Leaf = T, Parent = P, Cache = C>>(
-        &mut self,
-        visitor: &mut V,
-    ) -> ControlFlow<V::Break>
-    where
-        T: Clone + Eq,
-        P: Clone,
-        C: Clone + OctreeCache<T>,
-    {
-        let mut buffer = OctreeSplitBuffer::EMPTY;
-        let splits = self.extent.to_splits(&mut buffer);
-        self.root.visit_mut(visitor, self.extent.into(), splits)
+    /// Returns an iterator that mutably traverses the nodes in the octree depth-first.
+    ///
+    /// Unlike [`OctreeNode::iter`], leaf nodes can also be entered.
+    ///
+    /// - Use [`NoSplit`](visit::AllLeaves) iterate all nodes but never enter/split leaf nodes
+    /// - Use [`Find`](visit::Find) to find specific bounds, but without actually entering them
+    ///
+    /// Custom implementations of [`VisitMut`] can be used for more complex scenarios.
+    ///
+    /// The iterator will ensure that the octree remains normalized through iteration.
+    fn iter_mut(&mut self) -> IterMut<Self> {
+        IterMut::new(self)
     }
 }
 
-/// An immutable reference to the values of a node in an [`OctreeChunk`].
-///
-/// Intentionally does _not_ implement [`Eq`] and friends, since it is unclear as to whether that
-/// should include cache or not.
-#[derive(Debug)]
+/// A reference to leaf, parent and cache data of a node.
 #[derive_where(Clone, Copy)]
-pub enum OctreeNode<'a, T, P, C> {
-    Leaf(&'a T),
-    Parent { parent: &'a P, cache: &'a C },
+#[derive_where(Debug, Hash, PartialEq, Eq; T::LeafRef<'a>, T::Parent, T::CacheRef<'a>)]
+pub enum NodeDataRef<'a, T: OctreeNode + 'a> {
+    Leaf(T::LeafRef<'a>),
+    Parent(&'a T::Parent, T::CacheRef<'a>),
 }
 
-impl<'a, T, P, C> OctreeNode<'a, T, P, C> {
-    /// Whether this is a leaf node.
+impl<T: OctreeNode> NodeDataRef<'_, T> {
     pub fn is_leaf(self) -> bool {
         matches!(self, Self::Leaf(_))
     }
 
-    /// Returns the value of a leaf node.
-    pub fn leaf(self) -> Option<&'a T> {
+    pub fn is_parent(self) -> bool {
+        matches!(self, Self::Parent(..))
+    }
+}
+
+/// A reference to leaf, parent and cache data of a node with mutable access to the parent.
+#[derive_where(Debug, Hash, PartialEq, Eq; T::LeafRef<'a>, T::Parent, T::CacheRef<'a>)]
+pub enum NodeDataMutParent<'a, T: OctreeNode + 'a> {
+    Leaf(T::LeafRef<'a>),
+    Parent(&'a mut T::Parent, T::CacheRef<'a>),
+}
+
+impl<T: OctreeNode> NodeDataMutParent<'_, T> {
+    pub fn is_leaf(self) -> bool {
+        matches!(self, Self::Leaf(_))
+    }
+
+    pub fn is_parent(self) -> bool {
+        matches!(self, Self::Parent(..))
+    }
+}
+
+/// A mutable reference to leaf, parent and cache data of a node.
+///
+/// Cache data remains immutable, since it cannot be changed manually.
+#[derive_where(Debug, Hash, PartialEq, Eq; T::LeafMut<'a>, T::Parent, T::CacheRef<'a>)]
+pub enum NodeDataMut<'a, T: OctreeNode + 'a> {
+    Leaf(T::LeafMut<'a>),
+    Parent(&'a mut T::Parent, T::CacheRef<'a>),
+}
+
+impl<T: OctreeNode> NodeDataMut<'_, T> {
+    pub fn is_leaf(self) -> bool {
+        matches!(self, Self::Leaf(_))
+    }
+
+    pub fn is_parent(self) -> bool {
+        matches!(self, Self::Parent(..))
+    }
+}
+
+/// A reference to a child node, distinguishing between leaf and parent nodes.
+#[derive_where(Clone, Copy)]
+#[derive_where(Debug, Hash, PartialEq, Eq; T, T::LeafRef<'a>)]
+pub enum NodeRef<'a, T: OctreeNode + 'a> {
+    Leaf(T::LeafRef<'a>),
+    Parent(ParentNodeRef<'a, T>),
+}
+
+impl<'a, T: OctreeNode> NodeRef<'a, T> {
+    pub fn is_leaf(self) -> bool {
+        matches!(self, Self::Leaf(_))
+    }
+
+    pub fn is_parent(self) -> bool {
+        matches!(self, Self::Parent(..))
+    }
+
+    pub fn as_parent(self) -> Option<ParentNodeRef<'a, T>> {
+        if let Self::Parent(parent) = self {
+            Some(parent)
+        } else {
+            None
+        }
+    }
+}
+
+/// A reference to a node that is known to have children.
+#[derive_where(Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub struct ParentNodeRef<'a, T>(&'a T);
+
+impl<'a, T: OctreeNode> ParentNodeRef<'a, T> {
+    /// Returns a [`NodeRef`] to one of the children of this node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
+    pub fn get_child(self, index: u8) -> NodeRef<'a, T> {
+        self.0.get_child(index)
+    }
+}
+
+/// A mutable reference to a child node, distinguishing between leaf and parent nodes.
+#[derive_where(Debug, Hash, PartialEq, Eq; T, T::LeafMut<'a>)]
+pub enum NodeMut<'a, T: OctreeNode + 'a> {
+    Leaf(T::LeafMut<'a>),
+    Parent(ParentNodeMut<'a, T>),
+}
+
+impl<'a, T: OctreeNode> NodeMut<'a, T> {
+    pub fn is_leaf(self) -> bool {
+        matches!(self, Self::Leaf(_))
+    }
+
+    pub fn is_parent(self) -> bool {
+        matches!(self, Self::Parent(..))
+    }
+
+    pub fn as_leaf(self) -> Option<T::LeafMut<'a>> {
         if let Self::Leaf(leaf) = self {
             Some(leaf)
         } else {
             None
         }
     }
-
-    /// Whether this is a parent node.
-    pub fn is_parent(self) -> bool {
-        matches!(self, Self::Parent { .. })
-    }
-
-    /// Returns the value of the parent node.
-    pub fn parent(self) -> Option<&'a P> {
-        if let Self::Parent { parent, .. } = self {
-            Some(parent)
-        } else {
-            None
-        }
-    }
-
-    /// Returns the cached value of a parent node.
-    pub fn cache(self) -> Option<&'a C> {
-        if let Self::Parent { cache, .. } = self {
-            Some(cache)
-        } else {
-            None
-        }
-    }
-
-    /// Returns both parent value and cached value of a parent node.
-    pub fn parent_and_cache(self) -> Option<(&'a P, &'a C)> {
-        if let Self::Parent { parent, cache } = self {
-            Some((parent, cache))
-        } else {
-            None
-        }
-    }
 }
 
-/// A value used to cache leaf related properties in an octree.
-pub trait OctreeCache<T>: Sized {
-    /// Computes a cached value from leaf values `T` and already cached values of parent nodes.
-    ///
-    /// `child_extent` is usually used as a sort of multiplier for leaf values. E.g. to cache the
-    /// number of set bits in an octree of bools, you would count `true` not just as `1` but as the
-    /// volume of the `child_extent`.
-    fn compute_cache<'a>(
-        children: impl ExactSizeIterator<Item = LeafOrCache<'a, T, Self>>,
-        child_extent: OctreeExtent,
-    ) -> Self
-    where
-        T: 'a,
-        Self: 'a;
-}
-
-/// A reference to either a leaf value `T` or a cached value `C`.
-pub enum LeafOrCache<'a, T, C> {
-    Leaf(&'a T),
-    Cache(&'a C),
-}
-
-impl<T> OctreeCache<T> for () {
-    fn compute_cache<'a>(
-        _children: impl ExactSizeIterator<Item = LeafOrCache<'a, T, Self>>,
-        _child_extent: OctreeExtent,
-    ) -> Self
-    where
-        T: 'a,
-        Self: 'a,
-    {
-    }
-}
+/// A mutable reference to a node that is known to have children.
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub struct ParentNodeMut<'a, T>(&'a mut T);
