@@ -6,9 +6,9 @@ use super::{
     bounds::OctreeBounds,
     extent::{OctreeExtent, OctreeSplitList},
     node::Node,
-    stack::ParentNodeMutStack,
+    stack::MutStack,
     visit::{AllLeaves, VisitMut},
-    NodeDataRef, NodeMut, OctreeNode, ParentNodeMut,
+    NodeDataRef, NodeMut, NodeRef, OctreeNode, ParentNodeMut,
 };
 use crate::octree::NodeDataMut;
 
@@ -58,7 +58,7 @@ impl<'a, T: OctreeNode> IterMut<'a, T> {
         self.current()
     }
 
-    fn advance(&mut self, visit: impl VisitMut<T>) {
+    fn advance(&mut self, mut visit: impl VisitMut<T>) {
         match &mut self.state {
             State::Root {
                 yielded: yielded @ false,
@@ -69,7 +69,11 @@ impl<'a, T: OctreeNode> IterMut<'a, T> {
                     unreachable!()
                 };
                 self.state = if root.extent() != OctreeExtent::ONE {
-                    State::RootEntered(RootEntered::new(root))
+                    if visit.enter(root.extent().into(), root.as_node_ref()) {
+                        State::RootEntered(RootEntered::new(root))
+                    } else {
+                        State::RootSkipped
+                    }
                 } else {
                     State::RootSkipped
                 };
@@ -92,7 +96,7 @@ impl<'a, T: OctreeNode> IterMut<'a, T> {
     }
 
     fn normalize(&mut self) {
-        if let State::RootEntered(root_entered) = self.state {
+        if let State::RootEntered(root_entered) = &mut self.state {
             root_entered.normalize()
         }
     }
@@ -104,9 +108,9 @@ pub enum NodeMutAt<'a, T: OctreeNode> {
 }
 
 impl<'a, T: OctreeNode> NodeMutAt<'a, T> {
-    fn new(min: UVec3, extent: OctreeExtent, node: &mut T) -> NodeMutAt<T> {
+    fn new(min: UVec3, extent: OctreeExtent, node: &'a mut T) -> Self {
         if extent == OctreeExtent::ONE {
-            NodeMutAt::Point {
+            Self::Point {
                 point: min,
                 leaf: if let NodeDataMut::Leaf(leaf) = node.as_data_mut() {
                     leaf
@@ -115,7 +119,7 @@ impl<'a, T: OctreeNode> NodeMutAt<'a, T> {
                 },
             }
         } else {
-            NodeMutAt::Bounds(BoundedNodeMut {
+            Self::Bounds(BoundedNodeMut {
                 bounds: OctreeBounds::new(min, extent),
                 node,
             })
@@ -146,7 +150,7 @@ struct RootEntered<'a, T: OctreeNode> {
     /// Contains all nodes for which [`Visit::enter`] returns `true`.
     ///
     /// Once all children of a node have been traversed, the node is popped again.
-    parents: ParentNodeMutStack<'a, T>,
+    parents: MutStack<'a, T>,
     /// The [`OctreeBounds::min`] of the current bounds.
     ///
     /// Stored separately, to save on space for `remaining_splits`.
@@ -162,7 +166,7 @@ struct RootEntered<'a, T: OctreeNode> {
     remaining_splits: u8,
     /// Contains the full list of splits based on the extent of the root node.
     split_list: OctreeSplitList,
-    new_node: Option<NewNode<T>>,
+    new_node: Option<T>,
 }
 
 impl<'a, T: OctreeNode> RootEntered<'a, T> {
@@ -174,17 +178,14 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
 
         let extent = root_extent.split(split_list.levels[usize::from(remaining_splits)]);
 
-        let mut parents = ParentNodeMutStack::new();
-        let mut new_node = None;
-        match root.as_node_mut() {
-            NodeMut::Leaf(leaf) => {
-                new_node = Some(T::new(extent, T::clone_leaf(T::freeze_leaf(leaf))))
-            }
-            NodeMut::Parent(parent) => parents.push(parent),
-        }
+        let new_node = if let NodeMut::Leaf(leaf) = root.as_node_mut() {
+            Some(T::new(extent, T::clone_leaf(T::freeze_leaf(leaf))))
+        } else {
+            None
+        };
 
-        RootEntered {
-            parents,
+        Self {
+            parents: MutStack::new(root),
             min: UVec3::ZERO,
             extent,
             remaining_splits,
@@ -194,10 +195,20 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
     }
 
     fn normalize(&mut self) {
-        if let Some(new_node) = self.new_node {
-            match new_node.as_data() {
-                NodeDataRef::Leaf(leaf) if leaf != self.old_leaf => todo!("split"),
-                _ => todo!("split"),
+        if let Some(new_node) = &self.new_node {
+            let NodeDataRef::Leaf(old_leaf) = self.parents.last().expect("TODO").as_data() else {
+                panic!("parents should contain a leaf node");
+            };
+            let changed = if let NodeDataRef::Leaf(new_leaf) = new_node.as_data() {
+                !T::leaf_eq(new_leaf, old_leaf)
+            } else {
+                true
+            };
+
+            if changed {
+                let top = self.parents.last_mut().expect("TODO");
+                // top.split();
+                // push split nodes until done
             }
         }
     }
@@ -215,8 +226,8 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
             } else {
                 let parent = self.parents.last_mut()?;
                 let bounds = OctreeBounds::new(self.min, self.extent);
-                let index = bounds.small_index_within(parent.0.extent());
-                if let NodeMut::Parent(parent) = parent.0.get_child_mut_unchecked(index) {
+                let index = bounds.small_index_within(parent.extent());
+                if let NodeMut::Parent(parent) = parent.get_child_mut_unchecked(index) {
                     parent.0
                 } else {
                     panic!("node should be a parent node")
@@ -228,32 +239,10 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
 
 impl<'a, T: OctreeNode> Drop for RootEntered<'a, T> {
     fn drop(&mut self) {
+        self.normalize();
+
         while self.parents.last().is_some() {
             todo!("normalized pop")
-        }
-    }
-}
-
-struct NewNode<T: OctreeNode> {
-    /// The original value when the leaf was entered.
-    old: T::Leaf,
-    /// A reference to this node is handed out and checked for changes with [`Self::old`].
-    new: T,
-}
-
-impl<T: OctreeNode> NewNode<T> {
-    fn new(extent: OctreeExtent, leaf: T::Leaf) -> Self {
-        Self {
-            old: leaf.clone(),
-            new: T::new(extent, leaf),
-        }
-    }
-
-    fn changed(&self) -> bool {
-        if let NodeDataRef::Leaf(leaf) = self.new.as_data() {
-            !T::leaf_eq(&self.old, leaf)
-        } else {
-            true
         }
     }
 }

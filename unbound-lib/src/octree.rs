@@ -1,18 +1,18 @@
 pub mod bounds;
+pub mod cache;
 pub mod extent;
 pub mod iter;
 pub mod iter_mut;
 pub mod iter_mut_parent;
 pub mod node;
+mod stack;
 pub mod visit;
 
-mod stack;
-
+use cache::OctreeCache;
 use derive_where::derive_where;
 use extent::OctreeExtent;
 use iter::Iter;
 use iter_mut::IterMut;
-use visit::{Visit, VisitMut};
 
 // TODO: Consider a custom Debug impl for octree nodes that forward to some generic implementation
 // on OctreeNode
@@ -34,7 +34,7 @@ use visit::{Visit, VisitMut};
 /// generally strive for a size of two pointers.
 pub trait OctreeNode: Sized {
     /// The type of leaf values that this node can hold.
-    type Leaf: Clone + Eq;
+    type Leaf: Clone;
 
     /// A reference to a leaf, usually `&Self::Leaf`.
     ///
@@ -53,9 +53,11 @@ pub trait OctreeNode: Sized {
     /// Strips the mutability off of the given leaf reference.
     fn freeze_leaf(leaf: Self::LeafMut<'_>) -> Self::LeafRef<'_>;
 
+    /// Clones a [`OctreeNode::LeafRef`] into an owned [`OctreeNode::Leaf`].
     fn clone_leaf(leaf: Self::LeafRef<'_>) -> Self::Leaf;
 
-    fn leaf_eq(leaf: &Self::Leaf, leaf_ref: Self::LeafRef<'_>) -> bool;
+    /// Checks for equality between the values of two [`OctreeNode::LeafRef`]s.
+    fn leaf_eq(lhs: Self::LeafRef<'_>, rhs: Self::LeafRef<'_>) -> bool;
 
     /// The type of extra data that parent nodes can hold.
     type Parent: Clone;
@@ -63,7 +65,9 @@ pub trait OctreeNode: Sized {
     /// The type of cached leaf value.
     ///
     /// Calculated from [`OctreeNode::Leaf`] and already calculated [`OctreeNode::Cache`].
-    type Cache: Clone;
+    type Cache<'a>: OctreeCache<Self::LeafRef<'a>>
+    where
+        Self::Leaf: 'a;
 
     /// A reference to a cached value, usually `&Self::Cache`.
     ///
@@ -73,7 +77,8 @@ pub trait OctreeNode: Sized {
     /// trait and never be mutated directly.
     type CacheRef<'a>: Copy
     where
-        Self::Cache: 'a;
+        Self::Leaf: 'a,
+        Self::Cache<'a>: 'a;
 
     /// Constructs a new [`OctreeNode`] of the specified `extent` holding just the given `leaf`.
     fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self;
@@ -131,6 +136,41 @@ pub trait OctreeNode: Sized {
         }
     }
 
+    /// Fills the entire node with the given leaf while keeping the original extent.
+    fn fill(&mut self, leaf: Self::Leaf) {
+        *self = Self::new(self.extent(), leaf);
+    }
+
+    /// Returns an iterator that traverses the nodes in the octree depth-first.
+    ///
+    /// Specific parent nodes can be skipped using [`Visit`]. This is technically not necessary,
+    /// but dramatically speeds up iteration by allowing to skip entering parent nodes.
+    ///
+    /// - Use [`AllLeaves`](visit::AllLeaves) to iterate over all leaves
+    /// - Use [`Within`](visit::Within) to skip entering nodes outside some bounds
+    ///
+    /// Custom implementations of [`Visit`] can be used for more complex scenarios.
+    fn iter(&self) -> Iter<Self> {
+        Iter::new(self)
+    }
+
+    // fn iter_mut_parent(&mut self) -> IterMutParent<Self> {
+    //     IterMutParent::new(self)
+    // }
+
+    /// Returns an iterator that mutably traverses the nodes in the octree depth-first.
+    ///
+    /// Unlike [`OctreeNode::iter`], leaf nodes can also be entered.
+    ///
+    /// - Use [`AllLeaves`](visit::AllLeaves) iterate all nodes but never enter/split leaf nodes
+    ///
+    /// Custom implementations of [`VisitMut`] can be used for more complex scenarios.
+    ///
+    /// The iterator will ensure that the octree remains normalized through iteration.
+    fn iter_mut(&mut self) -> IterMut<Self> {
+        IterMut::new(self)
+    }
+
     /// Returns a [`NodeRef`] to one of the children of this node.
     ///
     /// # Panics
@@ -158,41 +198,53 @@ pub trait OctreeNode: Sized {
     /// `index` including `0`.
     fn get_child_mut_unchecked(&mut self, index: u8) -> NodeMut<Self>;
 
-    /// Fills the entire node with the given leaf while keeping the original extent.
-    fn fill(&mut self, leaf: Self::Leaf) {
-        *self = Self::new(self.extent(), leaf);
-    }
+    /// Split a leaf node into a parent node that can only hold child leaves.
+    ///
+    /// The resulting node is denormalized, as each child leaf contains the same value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a non-leaf node.
+    ///
+    /// Panics if `inner_extent` results in more than the maximum number of splits.
+    fn split_into_leaves_unchecked(&mut self, inner_extent: OctreeExtent, parent: Self::Parent);
 
-    /// Returns an iterator that traverses the nodes in the octree depth-first.
+    /// Splits a leaf node into a parent node that can hold arbitrary child nodes.
     ///
-    /// Specific parent nodes can be skipped using [`Visit`]. This is technically not necessary,
-    /// but dramatically speeds up iteration by allowing to skip entering parent nodes.
+    /// The resulting node is denormalized, as each child node contains the same leaf value.
     ///
-    /// - Use [`AllLeaves`](visit::AllLeaves) to iterate over all leaves
-    /// - Use [`Within`](visit::Within) to skip entering nodes outside some bounds
+    /// While this function could have a default implementation by calling
+    /// [`OctreeNode::split_into_leaves_unchecked`] followed by
+    /// [`OctreeNode::convert_leaves_into_nodes_unchecked`], this can usually be implemented more
+    /// efficiently if done manually.
     ///
-    /// Custom implementations of [`Visit`] can be used for more complex scenarios.
-    fn iter(&self) -> Iter<Self> {
-        Iter::new(self)
-    }
+    /// # Panics
+    ///
+    /// Panics if called on a non-leaf node.
+    ///
+    /// Panics if `inner_extent` results in more than the maximum number of splits.
+    fn split_into_nodes_unchecked(&mut self, inner_extent: OctreeExtent, parent: Self::Parent);
 
-    // fn iter_mut_parent<V: Visit<Self>>(&mut self, visit: V) -> IterMutParent<Self, V> {
-    //     IterMutParent::new(self, visit)
-    // }
+    /// Converts a parent node holding leaves into a parent node holding arbitrary child nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a non-leaves node.
+    fn convert_leaves_into_nodes_unchecked(&mut self, inner_extent: OctreeExtent);
 
-    /// Returns an iterator that mutably traverses the nodes in the octree depth-first.
+    /// Renormalizes this node, which is necessary after unchecked mutations.
     ///
-    /// Unlike [`OctreeNode::iter`], leaf nodes can also be entered.
+    /// - Nodes that hold the same value in each leaf are merged into a single leaf.
+    /// - Nodes that can hold arbitrary nodes but only hold leaves are turned into leaves nodes.
     ///
-    /// - Use [`NoSplit`](visit::AllLeaves) iterate all nodes but never enter/split leaf nodes
-    /// - Use [`Find`](visit::Find) to find specific bounds, but without actually entering them
+    /// Note, that only the node that this function directly called on is normalized. Child nodes
+    /// are assumed to already be normalized for performance reasons.
+    fn renormalize(&mut self);
+
+    /// Recalculates the cache value for the node, which is necessary after unchecked mutations.
     ///
-    /// Custom implementations of [`VisitMut`] can be used for more complex scenarios.
-    ///
-    /// The iterator will ensure that the octree remains normalized through iteration.
-    fn iter_mut(&mut self) -> IterMut<Self> {
-        IterMut::new(self)
-    }
+    /// Assumes the caches of child nodes are already up-to-date.
+    fn recompute_cache(&mut self, inner_extent: OctreeExtent);
 }
 
 /// A reference to leaf, parent and cache data of a node.

@@ -12,3 +12,4 @@ enum-map.workspace = true
 enumset.workspace = true
 glam.workspace = true
 itertools.workspace = true
+replace_with.workspace = true

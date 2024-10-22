@@ -66,6 +66,8 @@ impl OctreeExtent {
     }
 
     /// Returns the width, height and depth of this [`OctreeExtent`] in log2.
+    ///
+    /// This is the same as the number of splits along each axis.
     pub const fn size_log2(self) -> [u8; 3] {
         self.size_log2
     }
@@ -77,6 +79,14 @@ impl OctreeExtent {
             1 << self.size_log2[1],
             1 << self.size_log2[2],
         )
+    }
+
+    /// Returns the total number of times that this extent can be split evenly.
+    ///
+    /// This is the sum of all axes returned by [`Self::size_log2`].
+    pub fn total_splits(&self) -> u8 {
+        let [x, y, z] = self.size_log2();
+        x + y + z
     }
 
     pub const fn volume(self) -> u128 {
