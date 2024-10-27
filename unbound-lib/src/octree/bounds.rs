@@ -250,6 +250,24 @@ impl OctreeBounds {
             end: 1 << total_splits,
         }
     }
+
+    pub fn next_bounds_within(self, extent: OctreeExtent) -> Option<Self> {
+        self.next_min_within(extent).map(|min| Self { min, extent })
+    }
+
+    pub fn floor_to_extent(self, extent: OctreeExtent) -> Self {
+        Self {
+            min: Self::floor_min_to_extent(self.min, extent),
+            extent,
+        }
+    }
+
+    pub(crate) fn new_floored(min: UVec3, extent: OctreeExtent) -> Self {
+        Self {
+            min: Self::floor_min_to_extent(min, extent),
+            extent,
+        }
+    }
 }
 
 impl From<OctreeExtent> for OctreeBounds {

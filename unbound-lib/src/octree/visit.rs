@@ -16,18 +16,11 @@ pub trait VisitMut<T: OctreeNode> {
     ///
     /// Despite being for mutable iteration, mutations are intentionally not yet allowed here.
     fn enter(&mut self, bounds: OctreeBounds, node: NodeRef<T>) -> bool;
-
-    /// Called whenever a leaf node is entered and split into a parent node.
-    fn split(&mut self, bounds: OctreeBounds, node: NodeRef<T>) -> T::Parent;
 }
 
 impl<T: OctreeNode, V: VisitMut<T>> VisitMut<T> for &mut V {
     fn enter(&mut self, bounds: OctreeBounds, node: NodeRef<T>) -> bool {
         (*self).enter(bounds, node)
-    }
-
-    fn split(&mut self, bounds: OctreeBounds, node: NodeRef<T>) -> <T as OctreeNode>::Parent {
-        (*self).split(bounds, node)
     }
 }
 
@@ -44,10 +37,6 @@ impl<T: OctreeNode> VisitMut<T> for AllLeaves {
     fn enter(&mut self, _: OctreeBounds, node: NodeRef<T>) -> bool {
         node.is_parent()
     }
-
-    fn split(&mut self, _: OctreeBounds, _: NodeRef<T>) -> T::Parent {
-        unreachable!("leaf nodes should not be entered")
-    }
 }
 
 /// Skips over nodes that are not contained within the given bounds.
@@ -58,5 +47,35 @@ pub struct Within {
 impl<T: OctreeNode> Visit<T> for Within {
     fn enter(&mut self, bounds: OctreeBounds, _: ParentNodeRef<T>) -> bool {
         bounds.overlaps(self.bounds)
+    }
+}
+
+pub trait Split<T: OctreeNode> {
+    /// Called whenever a leaf node is entered and split into a parent node.
+    fn split(&mut self, bounds: OctreeBounds, leaf: T::LeafRef<'_>) -> T::Parent;
+}
+
+impl<T: OctreeNode, S: Split<T>> Split<T> for &mut S {
+    fn split(&mut self, bounds: OctreeBounds, leaf: T::LeafRef<'_>) -> <T as OctreeNode>::Parent {
+        (*self).split(bounds, leaf)
+    }
+}
+
+pub struct SplitDefault;
+
+impl<T: OctreeNode> Split<T> for SplitDefault
+where
+    T::Parent: Default,
+{
+    fn split(&mut self, _: OctreeBounds, _: T::LeafRef<'_>) -> T::Parent {
+        Default::default()
+    }
+}
+
+pub struct PanicOnSplit;
+
+impl<T: OctreeNode> Split<T> for PanicOnSplit {
+    fn split(&mut self, _: OctreeBounds, _: T::LeafRef<'_>) -> T::Parent {
+        panic!("should not split")
     }
 }

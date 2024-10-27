@@ -65,18 +65,27 @@ impl<'a, T> MutStack<'a, T> {
         self.parents.push(node);
     }
 
-    /// Pops the top of the stack, which makes the previous top of the stack accessible again.
+    /// Pops the top of the stack and returns it.
     ///
-    /// # Panics
-    ///
-    /// Panics if the stack is empty.
-    pub(crate) fn pop(&mut self) {
-        assert!(!self.parents.is_empty(), "stack should not be empty");
-        self.parents.pop();
+    /// Once the returned reference is dropped, the stack becomes accessible again, giving access to
+    /// the previous element.
+    pub(crate) fn pop(&mut self) -> Option<&mut T> {
+        self.parents.pop().map(|ptr| {
+            // SAFETY: Only the top node can be accessed at any given time.
+            unsafe { &mut *ptr }
+        })
     }
 
     /// Returns the top of the stack as a pointer.
     fn top_ptr(&self) -> Option<*mut T> {
         self.parents.last().copied()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.parents.len()
+    }
+
+    pub(crate) fn pop_after(&mut self, index: usize) {
+        self.parents.drain(index..);
     }
 }

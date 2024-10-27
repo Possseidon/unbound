@@ -41,7 +41,7 @@ impl<'a, T: OctreeNode> Iter<'a, T> {
                 if let NodeRef::Parent(parent) = root.as_node_ref() {
                     if visit.enter(root.extent().into(), parent) {
                         let root_entered = RootEntered::new(parent);
-                        let bounds = root_entered.extent.into();
+                        let bounds = root_entered.bounds;
                         let child = root.get_child(0);
                         self.state = State::RootEntered(root_entered);
                         return Some((bounds, child));
@@ -116,19 +116,8 @@ struct RootEntered<'a, T> {
     ///
     /// Once all children of a node have been traversed, the node is popped again.
     parents: ArrayVec<ParentNodeRef<'a, T>, { OctreeSplitList::MAX }>,
-    /// The [`OctreeBounds::min`] of the current bounds.
-    ///
-    /// Stored separately, to save on space for `remaining_splits`.
-    min: UVec3,
-    /// The [`OctreeBounds::extent`] of the current bounds.
-    ///
-    /// Stored separately, to save on space for `remaining_splits`.
-    extent: OctreeExtent,
-    /// The number of splits that can still be applied to the current node.
-    ///
-    /// Additionally, the most significant bit is set if the iterator was newly constructed and
-    /// is cleared once [`Iter::next`] was called for the first time.
-    remaining_splits: u8,
+    /// The current bounds.
+    bounds: OctreeBounds,
     /// Contains the full list of splits based on the extent of the root node.
     split_list: OctreeSplitList,
 }
@@ -140,14 +129,11 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
         let mut parents = ArrayVec::new();
         parents.push(parent);
 
-        let (split_list, split_count) = root_extent.to_split_list();
-        let remaining_splits = split_count - 1;
+        let split_list = root_extent.to_split_list();
 
         RootEntered {
             parents,
-            min: UVec3::ZERO,
-            extent: root_extent.split(split_list.levels[usize::from(remaining_splits)]),
-            remaining_splits,
+            bounds: root_extent.split(split_list.levels[0]).into(),
             split_list,
         }
     }
@@ -158,7 +144,7 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
 
     fn try_enter(&mut self, visit: &mut impl Visit<T>) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
         let last_parent = self.parents.last()?;
-        let bounds = OctreeBounds::new(self.min, self.extent);
+        let bounds = self.bounds;
         let index = bounds.small_index_within(last_parent.0.extent());
         let child = last_parent.get_child(index).as_parent()?;
 
@@ -166,12 +152,10 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
             return None;
         }
 
+        let splits = self.split_list.levels[self.parents.len()];
         self.parents.push(child);
-        self.remaining_splits -= 1;
-        let splits = self.split_list.levels[usize::from(self.remaining_splits)];
-        // min remains the same when entering
-        self.extent = self.extent.split(splits);
-        Some((OctreeBounds::new(self.min, self.extent), child.get_child(0)))
+        self.bounds = self.bounds.split_extent(splits);
+        Some((self.bounds, child.get_child(0)))
     }
 
     fn next_node(&mut self) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
@@ -191,20 +175,14 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
         parent: ParentNodeRef<'a, T>,
     ) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
         let parent_extent = parent.0.extent();
-        OctreeBounds::new(self.min, self.extent)
-            .next_min_within(parent_extent)
-            .map(|next_min| {
-                // extent remains the same when advancing
-                let bounds = OctreeBounds::new(next_min, self.extent);
-                let index = bounds.small_index_within(parent_extent);
-                (bounds, parent.get_child(index))
-            })
+        self.bounds.next_bounds_within(parent_extent).map(|bounds| {
+            let index = bounds.small_index_within(parent_extent);
+            (bounds, parent.get_child(index))
+        })
     }
 
     fn pop(&mut self, parent_extent: OctreeExtent) {
         self.parents.pop();
-        self.min = OctreeBounds::floor_min_to_extent(self.min, parent_extent);
-        self.extent = parent_extent;
-        self.remaining_splits += 1;
+        self.bounds = self.bounds.floor_to_extent(parent_extent);
     }
 }

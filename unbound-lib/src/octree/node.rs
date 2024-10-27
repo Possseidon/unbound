@@ -7,8 +7,9 @@ use itertools::Itertools;
 use replace_with::replace_with_or_abort;
 
 use super::{
-    cache::OctreeCache, extent::OctreeExtent, NodeDataMut, NodeDataMutParent, NodeDataRef, NodeMut,
-    NodeRef, OctreeNode,
+    cache::{CacheInput, OctreeCache},
+    extent::OctreeExtent,
+    NodeDataMut, NodeDataMutParent, NodeDataRef, NodeMut, NodeRef, OctreeNode,
 };
 
 /// A node within an octree, either holding a leaf with a value of type `T` or more [`Node`]s.
@@ -35,9 +36,14 @@ use super::{
 /// contents of the node is not modified.
 #[derive(Clone, Debug)]
 #[derive_where(Hash, PartialEq, Eq; T, P)]
-pub struct Node<T, P = (), C = ()>(Repr<T, P, C>);
+pub struct Node<T, P = (), C = NoCache>(Repr<T, P, C>);
 
-impl<T: Clone + Eq, P: Clone, C: for<'a> OctreeCache<&'a T>> OctreeNode for Node<T, P, C> {
+impl<T, P, C> OctreeNode for Node<T, P, C>
+where
+    T: Clone + Eq,
+    P: Clone,
+    C: for<'a, 'b> OctreeCache<'a, &'b T, Ref = &'a C> + Eq,
+{
     type Leaf = T;
 
     type LeafRef<'a>
@@ -68,12 +74,6 @@ impl<T: Clone + Eq, P: Clone, C: for<'a> OctreeCache<&'a T>> OctreeNode for Node
         = C
     where
         T: 'a;
-
-    type CacheRef<'a>
-        = &'a C
-    where
-        T: 'a,
-        C: 'a;
 
     fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self {
         Self(Repr::Leaf(extent, leaf))
@@ -380,6 +380,20 @@ impl<T, P, C> Node<T, P, C> {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NoCache;
+
+impl<'a, T> OctreeCache<'a, T> for NoCache {
+    type Ref = &'a NoCache;
+
+    fn compute_cache(
+        _: OctreeExtent,
+        _: impl IntoIterator<Item = CacheInput<'a, T, Self>>,
+    ) -> Self {
+        Self
+    }
+}
+
 #[derive(Clone, Debug)]
 #[derive_where(Hash, PartialEq, Eq; T, P)]
 enum Repr<T, P, C> {
@@ -473,14 +487,14 @@ impl<T, P, C> Repr<T, P, C> {
     ) -> Self
     where
         T: Clone,
-        C: for<'a> OctreeCache<&'a T>,
+        C: for<'a, 'b> OctreeCache<'a, &'b T>,
     {
         new(
             outer_extent,
             Arc::new(LeavesNode {
                 leaves: array_init::array_init(|_| leaf.clone()),
                 parent,
-                cache: C::compute_cache(outer_extent, [leaf], []),
+                cache: C::compute_cache(outer_extent, [CacheInput::Leaf(leaf)]),
             }),
         )
     }
@@ -494,14 +508,14 @@ impl<T, P, C> Repr<T, P, C> {
     ) -> Self
     where
         T: Clone,
-        C: for<'a> OctreeCache<&'a T>,
+        C: for<'a, 'b> OctreeCache<'a, &'b T>,
     {
         new(
             outer_extent,
             Arc::new(ParentNode {
                 children: array_init::array_init(|_| Node(Self::Leaf(inner_extent, leaf.clone()))),
                 parent,
-                cache: C::compute_cache(outer_extent, [leaf], []),
+                cache: C::compute_cache(outer_extent, [CacheInput::Leaf(leaf)]),
             }),
         )
     }
@@ -536,9 +550,9 @@ impl<T, P, C> Repr<T, P, C> {
     ) where
         T: Clone,
         P: Clone,
-        C: for<'a> OctreeCache<&'a T>,
+        C: for<'a, 'b> OctreeCache<'a, &'b T> + Eq,
     {
-        let cache = C::compute_cache(inner_extent, &leaves.leaves, []);
+        let cache = C::compute_cache(inner_extent, leaves.leaves.iter().map(CacheInput::Leaf));
         if cache != leaves.cache {
             Arc::make_mut(leaves).cache = cache;
         }
@@ -550,28 +564,24 @@ impl<T, P, C> Repr<T, P, C> {
     ) where
         T: Clone,
         P: Clone,
-        C: for<'a> OctreeCache<&'a T>,
+        C: for<'a, 'b> OctreeCache<'a, &'b T, Ref = &'a C> + Eq,
     {
         let cache = C::compute_cache(
             inner_extent,
-            parent.children.iter().filter_map(|node| match &node.0 {
-                Repr::Leaf(_, leaf) => Some(leaf),
-                _ => None,
-            }),
-            parent.children.iter().filter_map(|node| match &node.0 {
-                Repr::Leaf(_, _) => None,
-                Repr::Leaves2(_, arc) => Some(&arc.cache),
-                Repr::Leaves4(_, arc) => Some(&arc.cache),
-                Repr::Leaves8(_, arc) => Some(&arc.cache),
-                Repr::Leaves16(_, arc) => Some(&arc.cache),
-                Repr::Leaves32(_, arc) => Some(&arc.cache),
-                Repr::Leaves64(_, arc) => Some(&arc.cache),
-                Repr::Parent2(_, arc) => Some(&arc.cache),
-                Repr::Parent4(_, arc) => Some(&arc.cache),
-                Repr::Parent8(_, arc) => Some(&arc.cache),
-                Repr::Parent16(_, arc) => Some(&arc.cache),
-                Repr::Parent32(_, arc) => Some(&arc.cache),
-                Repr::Parent64(_, arc) => Some(&arc.cache),
+            parent.children.iter().map(|node| match &node.0 {
+                Repr::Leaf(_, leaf) => CacheInput::Leaf(leaf),
+                Repr::Leaves2(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Leaves4(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Leaves8(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Leaves16(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Leaves32(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Leaves64(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Parent2(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Parent4(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Parent8(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Parent16(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Parent32(_, arc) => CacheInput::Cache(&arc.cache),
+                Repr::Parent64(_, arc) => CacheInput::Cache(&arc.cache),
             }),
         );
         if cache != parent.cache {
