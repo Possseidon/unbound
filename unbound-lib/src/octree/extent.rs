@@ -1,19 +1,19 @@
 use glam::{uvec3, UVec3};
 
-/// The extent of an octree, i.e. how often it can be split along the different axes.
+/// The extent of an [`OctreeChunk`](super::OctreeChunk).
 ///
-/// This basically stores the maximum size of the octree in log2. This also means, that only
-/// sizes that are a power of two can be stored.
+/// [`OctreeChunk`](super::OctreeChunk)s always have side lengths that are powers of two. For this
+/// reason, the size is stored as log2 internally.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub struct OctreeExtent {
     size_log2: [u8; 3],
 }
 
 impl OctreeExtent {
-    /// The smallest subdivision of an octree that can no longer be split.
+    /// The smallest possible extent, covering only a singular point.
     pub const ONE: Self = Self { size_log2: [0; 3] };
 
-    /// The largest possible size of the root of an octree.
+    /// The largest possible extent of an [`OctreeChunk`](super::OctreeChunk).
     pub const MAX: Self = Self {
         size_log2: [Self::MAX_SIZE_LOG2; 3],
     };
@@ -21,6 +21,9 @@ impl OctreeExtent {
     /// The maximum size along each axis as log2.
     pub const MAX_SIZE_LOG2: u8 = 31;
 
+    /// Creates a new [`OctreeExtent`] for the given `size_log2`.
+    ///
+    /// Returns [`None`] if any value exceeds [`Self::MAX_SIZE_LOG2`].
     pub const fn from_size_log2(size_log2: [u8; 3]) -> Option<Self> {
         if size_log2[0] <= Self::MAX_SIZE_LOG2
             && size_log2[1] <= Self::MAX_SIZE_LOG2
@@ -32,12 +35,12 @@ impl OctreeExtent {
         }
     }
 
-    /// Creates a new [`OctreeExtent`] for the given size.
+    /// Creates a new [`OctreeExtent`] for the given `size`.
     ///
     /// Rounds the size up to the closest representable size, i.e. the next power of two.
     ///
-    /// Returns [`None`] if the size is zero or the resulting [`OctreeExtent`] would be larger
-    /// than [`OctreeExtent::MAX`].
+    /// Returns [`None`] if the volume of `size` is zero or if the resulting [`OctreeExtent`] would
+    /// be larger than [`OctreeExtent::MAX`].
     pub const fn from_size(size: UVec3) -> Option<Self> {
         const fn round(value: u32) -> Option<u8> {
             match value {
@@ -64,11 +67,15 @@ impl OctreeExtent {
     }
 
     /// Returns the width, height and depth of this [`OctreeExtent`] in log2.
+    ///
+    /// Values are guaranteed to be at most [`Self::MAX_SIZE_LOG2`].
     pub const fn size_log2(self) -> [u8; 3] {
         self.size_log2
     }
 
     /// Returns the width, height and depth of this [`OctreeExtent`].
+    ///
+    /// Values are guaranteed to be in range [`1..=2 ^ MAX_SIZE_LOG2`](Self::MAX_SIZE_LOG2).
     pub const fn size(self) -> UVec3 {
         uvec3(
             1 << self.size_log2[0],
@@ -213,7 +220,7 @@ impl From<OctreeExtent> for OctreeExtentCompact {
 
 impl std::fmt::Debug for OctreeExtentCompact {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OctreeExtent")
+        f.debug_struct("OctreeExtentCompact")
             .field("size_log2", &OctreeExtent::from(*self))
             .finish()
     }
