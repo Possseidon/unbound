@@ -200,8 +200,8 @@ impl OctreeSplits {
         let zyx = index;
         let zy = zyx >> self.splits[0];
         [
-            zyx & !(1 << self.splits[0]),
-            zy & !(1 << self.splits[1]),
+            zyx & !(u8::MAX << self.splits[0]),
+            zy & !(u8::MAX << self.splits[1]),
             zy >> self.splits[1],
         ]
     }
