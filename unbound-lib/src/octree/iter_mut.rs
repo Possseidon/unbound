@@ -54,7 +54,7 @@ impl<'a, T: OctreeNode, S: Split<T>> IterMut<'a, T, S> {
         clippy::should_implement_trait,
         reason = "cannot implement Iterator due to lifetime"
     )]
-    pub fn next(&mut self, visit: impl VisitMut<T>) -> Option<NodeMutAt<T>> {
+    pub fn next(&mut self, visit: impl VisitMut<T>) -> Option<BoundedNodeMut<T>> {
         self.split_if_new_node_changed();
         self.advance(visit);
         self.current()
@@ -86,12 +86,12 @@ impl<'a, T: OctreeNode, S: Split<T>> IterMut<'a, T, S> {
         }
     }
 
-    fn current(&mut self) -> Option<NodeMutAt<T>> {
+    fn current(&mut self) -> Option<BoundedNodeMut<T>> {
         match &mut self.state {
             State::Root { yielded, root, .. } => {
                 assert!(*yielded, "current must be called after advance");
                 let extent = root.extent();
-                Some(NodeMutAt::new(UVec3::ZERO, root))
+                Some(BoundedNodeMut::new(UVec3::ZERO, root))
             }
             State::RootEntered(root_entered) => root_entered.current(),
             State::RootSkipped => None,
@@ -105,39 +105,24 @@ impl<'a, T: OctreeNode, S: Split<T>> IterMut<'a, T, S> {
     }
 }
 
-pub enum NodeMutAt<'a, T: OctreeNode> {
-    Bounds(BoundedNodeMut<'a, T>),
+struct BoundedNodeMut<'a, T: OctreeNode>(BoundedNodeMutInner<'a, T>);
+
+enum BoundedNodeMutInner<'a, T: OctreeNode> {
+    /// Used if a proper node already exists.
+    Bounds { min: UVec3, node: &'a mut T },
+    /// Used if no proper node exists yet.
+    Leaf {
+        /// Full bounds must be stored, since [`OctreeNode::LeafMut`] does not have a known extent.
+        bounds: OctreeBounds,
+        /// Always starts out as a leaf node.
+        leaf: T::LeafMut<'a>,
+        /// Always starts out as a reference to [`None`].
+        ///
+        /// Set to [`Some`], when the leaf has to be promoted to a proper node.
+        node: &'a mut Option<T>,
+    },
+    /// Used for leaf nodes covering a single point.
     Point { point: UVec3, leaf: T::LeafMut<'a> },
-}
-
-impl<'a, T: OctreeNode> NodeMutAt<'a, T> {
-    fn new(min: UVec3, node: &'a mut T) -> Self {
-        if node.extent() == OctreeExtent::ONE {
-            Self::Point {
-                point: min,
-                leaf: if let NodeDataMut::Leaf(leaf) = node.as_data_mut() {
-                    leaf
-                } else {
-                    panic!("point node should be a leaf")
-                },
-            }
-        } else {
-            Self::Bounds(BoundedNodeMut { min, node })
-        }
-    }
-}
-
-pub struct BoundedNodeMut<'a, T> {
-    min: UVec3,
-    node: &'a mut T,
-}
-
-impl<'a, T: OctreeNode> BoundedNodeMut<'a, T> {
-    pub fn bounds(&self) -> OctreeBounds {
-        OctreeBounds::new(self.min, self.node.extent())
-    }
-
-    // TODO: mutators must make sure node.extent doesn't change!
 }
 
 enum State<'a, T: OctreeNode, S: Split<T>> {
@@ -346,11 +331,11 @@ impl<'a, T: OctreeNode, S: Split<T>> RootEntered<'a, T, S> {
         todo!("inc index");
     }
 
-    fn current(&mut self) -> Option<NodeMutAt<T>> {
+    fn current(&mut self) -> Option<BoundedNodeMut<T>> {
         Some(
             if let Some(VirtualNode { node, .. }) = &mut self.virtual_node {
                 if node.extent() == OctreeExtent::ONE {
-                    NodeMutAt::Point {
+                    BoundedNodeMut::Point {
                         point: self.min,
                         leaf: if let NodeDataMut::Leaf(leaf) = node.as_data_mut() {
                             leaf
@@ -359,7 +344,7 @@ impl<'a, T: OctreeNode, S: Split<T>> RootEntered<'a, T, S> {
                         },
                     }
                 } else {
-                    NodeMutAt::Bounds(BoundedNodeMut {
+                    BoundedNodeMut::Bounds(BoundedNodeMut {
                         min: self.min,
                         node,
                     })
@@ -368,7 +353,7 @@ impl<'a, T: OctreeNode, S: Split<T>> RootEntered<'a, T, S> {
                 let extent = Self::last_non_virtual_extent(&mut self.parents, &self.split_list);
                 let parent = self.parents.last_mut()?;
                 let index = OctreeBounds::new(self.min, extent).small_index_within(parent.extent());
-                NodeMutAt::Bounds(BoundedNodeMut {
+                BoundedNodeMut::Bounds(BoundedNodeMut {
                     min: self.min,
                     node: if let NodeMut::Node(parent) = parent.get_child_mut_unchecked(index) {
                         parent.0
