@@ -1,5 +1,6 @@
 use std::{mem::replace, num::NonZeroU8};
 
+use bitvec::BitArr;
 use glam::UVec3;
 
 use super::{
@@ -168,6 +169,7 @@ struct RootEntered<'a, T: OctreeNode, S: Split<T>> {
     ///
     /// Once all children of a node have been traversed, the node is popped again.
     parents: MutStack<'a, T>,
+    fully_entered_parents: BitArr!(for OctreeSplitList::MAX),
     /// The position of the node that got returned by the last call to [`IterMut::next`].
     ///
     /// Positions of parents can be obtained by calling [`OctreeBounds::floor_min_to_extent`] with
@@ -273,7 +275,7 @@ impl<'a, T: OctreeNode, S: Split<T>> RootEntered<'a, T, S> {
             self.parents
                 .push(match last_parent.get_child_mut_unchecked(index) {
                     NodeMut::Leaf(leaf) => todo!(),
-                    NodeMut::Parent(parent_node_mut) => todo!(),
+                    NodeMut::Node(parent_node_mut) => todo!(),
                 });
         }
 
@@ -331,7 +333,7 @@ impl<'a, T: OctreeNode, S: Split<T>> RootEntered<'a, T, S> {
                         });
                     }
                     NodeRef::Parent(parent_node_ref) => {
-                        let NodeMut::Parent(node) = parent.get_child_mut_unchecked(index) else {
+                        let NodeMut::Node(node) = parent.get_child_mut_unchecked(index) else {
                             panic!("node should be a parent");
                         };
                         self.parents.push(node.0);
@@ -368,7 +370,7 @@ impl<'a, T: OctreeNode, S: Split<T>> RootEntered<'a, T, S> {
                 let index = OctreeBounds::new(self.min, extent).small_index_within(parent.extent());
                 NodeMutAt::Bounds(BoundedNodeMut {
                     min: self.min,
-                    node: if let NodeMut::Parent(parent) = parent.get_child_mut_unchecked(index) {
+                    node: if let NodeMut::Node(parent) = parent.get_child_mut_unchecked(index) {
                         parent.0
                     } else {
                         panic!("node should be a parent")

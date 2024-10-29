@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use arrayvec::ArrayVec;
 
-use super::{extent::OctreeSplitList, ParentNodeMut, ParentNodeRef};
+use super::extent::OctreeSplitList;
 
 /// A stack of `&mut T`.
 ///

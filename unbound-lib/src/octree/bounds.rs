@@ -1,6 +1,7 @@
 use glam::{uvec3, UVec3};
 
 use super::extent::{OctreeExtent, OctreeSplits};
+use crate::math::bounds::UBounds3;
 
 /// The location of a node within an octree.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -14,6 +15,9 @@ pub struct OctreeBounds {
 }
 
 impl OctreeBounds {
+    const MIN_POINT: UVec3 = UVec3::ZERO;
+    const MAX_POINT: UVec3 = OctreeExtent::MAX.size().wrapping_sub(UVec3::ONE);
+
     /// Returns whether the given `min` and `extent` would form a valid [`OctreeBounds`].
     ///
     /// Valid [`OctreeBounds`] require that the bounds' `min` is a multiple of its `extent`.
@@ -21,8 +25,11 @@ impl OctreeBounds {
     /// Since [`OctreeExtent`] is limited to powers of two, this can easily be checked by making
     /// sure the lower bits are set to zero.
     pub const fn is_valid(min: UVec3, extent: OctreeExtent) -> bool {
+        const MAX: u32 = OctreeBounds::MAX_POINT.x;
+        let max = min.saturating_add(extent.size());
         let floored = Self::floor_min_to_extent(min, extent);
-        floored.x == min.x && floored.y == min.y && floored.z == min.z
+        (max.x <= MAX && max.y <= MAX && max.z <= MAX)
+            && (floored.x == min.x && floored.y == min.y && floored.z == min.z)
     }
 
     /// Floors the given `min` so that it forms a valid [`OctreeBounds`] with the given `extent`.
@@ -53,6 +60,13 @@ impl OctreeBounds {
             Some(Self { min, extent })
         } else {
             None
+        }
+    }
+
+    pub fn new_floored(min: UVec3, extent: OctreeExtent) -> Self {
+        Self {
+            min: Self::floor_min_to_extent(min, extent),
+            extent,
         }
     }
 
@@ -88,6 +102,10 @@ impl OctreeBounds {
         }
     }
 
+    pub const fn to_ubounds3(self) -> UBounds3 {
+        UBounds3::with_extent_at(self.min, self.extent().size())
+    }
+
     /// The lower bound (inclusive).
     pub const fn min(self) -> UVec3 {
         self.min
@@ -97,7 +115,12 @@ impl OctreeBounds {
     pub const fn max(self) -> UVec3 {
         // purely using wrapping_add and wrapping_sub for const; it can never actually overflow
         self.min
-            .wrapping_add(self.extent.size().wrapping_sub(UVec3::splat(1)))
+            .wrapping_add(self.extent.size().wrapping_sub(UVec3::ONE))
+    }
+
+    /// The extent of the bounds.
+    pub const fn extent(self) -> OctreeExtent {
+        self.extent
     }
 
     /// Whether the specified `point` is part of the bounds.
@@ -126,11 +149,6 @@ impl OctreeBounds {
         (self.min.x <= other_max.x && other.min.x <= self_max.x)
             && (self.min.y <= other_max.y && other.min.y <= self_max.y)
             && (self.min.z <= other_max.z && other.min.z <= self_max.z)
-    }
-
-    /// The extent of the bounds.
-    pub const fn extent(self) -> OctreeExtent {
-        self.extent
     }
 
     /// Updates the extent and rounds `min` down so that it remains a multiple of `extent`.
@@ -180,22 +198,8 @@ impl OctreeBounds {
 
     /// Returns the index of these bounds within the given `extent`.
     pub const fn index_within(self, extent: OctreeExtent) -> u128 {
-        let inner_bit_offsets = self.extent.size_log2();
-        let outer_bit_offsets = extent.size_log2();
-
-        let x_bit_width = outer_bit_offsets[0] - inner_bit_offsets[0];
-        let y_bit_width = outer_bit_offsets[1] - inner_bit_offsets[1];
-        let z_bit_width = outer_bit_offsets[2] - inner_bit_offsets[2];
-
-        let x_mask = !(u32::MAX << x_bit_width);
-        let y_mask = !(u32::MAX << y_bit_width);
-        let z_mask = !(u32::MAX << z_bit_width);
-
-        let x = ((self.min.x >> inner_bit_offsets[0]) & x_mask) as u128;
-        let y = ((self.min.y >> inner_bit_offsets[1]) & y_mask) as u128;
-        let z = ((self.min.z >> inner_bit_offsets[2]) & z_mask) as u128;
-
-        x | y << x_bit_width | z << y_bit_width
+        let ([x_bit_width, y_bit_width], [x, y, z]) = self.small_index_helper(extent);
+        x as u128 | (y as u128) << x_bit_width | (z as u128) << y_bit_width
     }
 
     /// Returns the index of these bounds within the given `extent` as a [`u8`].
@@ -207,23 +211,24 @@ impl OctreeBounds {
                 .try_into()
                 .expect("OctreeBounds index should fit in a u8")
         } else {
-            let inner_bit_offsets = self.extent.size_log2();
-            let outer_bit_offsets = extent.size_log2();
-
-            let x_bit_width = outer_bit_offsets[0] - inner_bit_offsets[0];
-            let y_bit_width = outer_bit_offsets[1] - inner_bit_offsets[1];
-            let z_bit_width = outer_bit_offsets[2] - inner_bit_offsets[2];
-
-            let x_mask = !(u32::MAX << x_bit_width);
-            let y_mask = !(u32::MAX << y_bit_width);
-            let z_mask = !(u32::MAX << z_bit_width);
-
-            let x = ((self.min.x >> inner_bit_offsets[0]) & x_mask) as u8;
-            let y = ((self.min.y >> inner_bit_offsets[1]) & y_mask) as u8;
-            let z = ((self.min.z >> inner_bit_offsets[2]) & z_mask) as u8;
-
-            x | y << x_bit_width | z << y_bit_width
+            let ([x_bit_width, y_bit_width], [x, y, z]) = self.small_index_helper(extent);
+            x as u8 | (y as u8) << x_bit_width | (z as u8) << y_bit_width
         }
+    }
+
+    const fn small_index_helper(self, extent: OctreeExtent) -> ([u8; 2], [u32; 3]) {
+        let inner_bit_offsets = self.extent.size_log2();
+        let outer_bit_offsets = extent.size_log2();
+
+        let x_bit_width = outer_bit_offsets[0] - inner_bit_offsets[0];
+        let y_bit_width = outer_bit_offsets[1] - inner_bit_offsets[1];
+        let z_bit_width = outer_bit_offsets[2] - inner_bit_offsets[2];
+
+        let x = self.min.x >> inner_bit_offsets[0] & !(u32::MAX << x_bit_width);
+        let y = self.min.y >> inner_bit_offsets[1] & !(u32::MAX << y_bit_width);
+        let z = self.min.z >> inner_bit_offsets[2] & !(u32::MAX << z_bit_width);
+
+        ([x_bit_width, y_bit_width], [x, y, z])
     }
 
     /// Splits the extent of the bounds according to `splits`, keeping [`Self::min`] as is.
@@ -262,11 +267,17 @@ impl OctreeBounds {
         }
     }
 
-    pub(crate) fn new_floored(min: UVec3, extent: OctreeExtent) -> Self {
-        Self {
-            min: Self::floor_min_to_extent(min, extent),
-            extent,
-        }
+    pub fn split_to_index(mut self, splits: OctreeSplits, index: u8) -> OctreeBounds {
+        self.extent = self.extent.split(splits);
+
+        let indices = splits.split_index(index);
+        let index_bit_offset = self.extent.size_log2();
+
+        self.min.x |= (indices[0] as u32) << index_bit_offset[0];
+        self.min.y |= (indices[1] as u32) << index_bit_offset[1];
+        self.min.z |= (indices[2] as u32) << index_bit_offset[2];
+
+        self
     }
 }
 

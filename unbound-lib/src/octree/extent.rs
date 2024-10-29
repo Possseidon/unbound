@@ -192,6 +192,28 @@ impl OctreeSplits {
     pub const fn z(self) -> u8 {
         self.splits[2]
     }
+
+    /// Splits the given index into separate x, y and z components.
+    ///
+    /// Each component is as big as defined by the number of splits.
+    pub const fn split_index(self, index: u8) -> [u8; 3] {
+        let zyx = index;
+        let zy = zyx >> self.splits[0];
+        [
+            zyx & !(1 << self.splits[0]),
+            zy & !(1 << self.splits[1]),
+            zy >> self.splits[1],
+        ]
+    }
+
+    /// Merges separate x, y and z components into a single index.
+    ///
+    /// Each component is as big as defined by the number of splits.
+    pub const fn merge_index(self, indices: [u8; 3]) -> u8 {
+        indices[0]
+            | (indices[1] << self.splits[0])
+            | (indices[2] << (self.splits[0] + self.splits[1]))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]

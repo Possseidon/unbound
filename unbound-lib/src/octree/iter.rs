@@ -1,12 +1,13 @@
 use std::iter::FusedIterator;
 
 use arrayvec::ArrayVec;
+use bitvec::{array::BitArray, BitArr};
 use glam::UVec3;
 
 use super::{
     bounds::OctreeBounds,
-    extent::{OctreeExtent, OctreeSplitList},
-    visit::Visit,
+    extent::{OctreeExtent, OctreeSplitList, OctreeSplits},
+    visit::{Enter, Visit, VisitNode},
     NodeRef, OctreeNode, ParentNodeRef,
 };
 
@@ -33,23 +34,20 @@ impl<'a, T: OctreeNode> Iter<'a, T> {
     pub fn next(&mut self, mut visit: impl Visit<T>) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
         match &mut self.state {
             State::ReturnRoot(root) => {
-                let item = (root.extent().into(), root.as_node_ref());
+                let item = (root.extent().into(), NodeRef::Node(*root));
                 self.state = State::AskEnterRoot(root);
                 Some(item)
             }
             State::AskEnterRoot(root) => {
-                if let NodeRef::Parent(parent) = root.as_node_ref() {
-                    if visit.enter(root.extent().into(), parent) {
-                        let root_entered = RootEntered::new(parent);
-                        let bounds = root_entered.bounds;
-                        let child = root.get_child(0);
-                        self.state = State::RootEntered(root_entered);
-                        return Some((bounds, child));
-                    }
-                }
+                let Some((root_entered, index)) = RootEntered::new(*root, visit) else {
+                    self.state = State::RootSkipped;
+                    return None;
+                };
 
-                self.state = State::RootSkipped;
-                None
+                let bounds = root_entered.bounds;
+                let child = root.get_child(index);
+                self.state = State::RootEntered(root_entered);
+                Some((bounds, child))
             }
             State::RootEntered(root_entered) => root_entered.advance(&mut visit),
             State::RootSkipped => None,
@@ -66,22 +64,6 @@ pub struct IterWithVisit<'a, T: OctreeNode, V: Visit<T>> {
     iter: Iter<'a, T>,
     /// Decides whether a specific parent node should be entered or skipped over.
     visit: V,
-}
-
-impl<'a, T: OctreeNode, V: Visit<T>> IterWithVisit<'a, T, V> {
-    pub fn leaves(self) -> impl FusedIterator<Item = (OctreeBounds, T::LeafRef<'a>)> {
-        self.filter_map(|(bounds, node)| match node {
-            NodeRef::Leaf(leaf) => Some((bounds, leaf)),
-            NodeRef::Parent(_) => None,
-        })
-    }
-
-    pub fn parents(self) -> impl FusedIterator<Item = (OctreeBounds, ParentNodeRef<'a, T>)> {
-        self.filter_map(|(bounds, node)| match node {
-            NodeRef::Leaf(_) => None,
-            NodeRef::Parent(parent) => Some((bounds, parent)),
-        })
-    }
 }
 
 impl<'a, T: OctreeNode, V: Visit<T>> Iterator for IterWithVisit<'a, T, V> {
@@ -112,10 +94,17 @@ enum State<'a, T> {
 ///
 /// `parents` being empty indicates the end of iteration.
 struct RootEntered<'a, T> {
-    /// Contains all nodes for which [`Visit::enter`] returns `true`.
+    /// Contains all nodes for which at least one child node is [`Visit::enter`]ed.
     ///
     /// Once all children of a node have been traversed, the node is popped again.
     parents: ArrayVec<ParentNodeRef<'a, T>, { OctreeSplitList::MAX }>,
+    /// All parent nodes for which [all](`Enter::All`) child nodes should be entered.
+    ///
+    /// E.g. the LSB is `1` if the children of the outermost, i.e. first, parent should be entered.
+    ///
+    /// If instead, the bit is `0`, only a specific child was entered and the remaining children of
+    /// this particular parent can be skipped over completely when doing the backtracking.
+    fully_entered_parents: BitArr!(for OctreeSplitList::MAX),
     /// The current bounds.
     bounds: OctreeBounds,
     /// Contains the full list of splits based on the extent of the root node.
@@ -123,19 +112,28 @@ struct RootEntered<'a, T> {
 }
 
 impl<'a, T: OctreeNode> RootEntered<'a, T> {
-    fn new(parent: ParentNodeRef<'a, T>) -> Self {
-        let root_extent = parent.0.extent();
+    fn new(root: &'a T, visit: impl Visit<T>) -> Option<(Self, u8)> {
+        let parent = ParentNodeRef::new(root)?;
 
         let mut parents = ArrayVec::new();
         parents.push(parent);
 
+        let root_extent = parent.get().extent();
         let split_list = root_extent.to_split_list();
+        let splits = split_list.levels[0];
 
-        RootEntered {
+        let (all, index) = Self::visit(visit, parent, splits)?;
+
+        let mut fully_entered_parents = BitArray::default();
+        fully_entered_parents.set(0, all);
+
+        let root_entered = RootEntered {
             parents,
-            bounds: root_extent.split(split_list.levels[0]).into(),
+            fully_entered_parents,
+            bounds: OctreeBounds::from_extent(root_extent).split_to_index(splits, index),
             split_list,
-        }
+        };
+        Some((root_entered, index))
     }
 
     fn advance(&mut self, visit: &mut impl Visit<T>) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
@@ -145,26 +143,27 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
     fn try_enter(&mut self, visit: &mut impl Visit<T>) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
         let last_parent = self.parents.last()?;
         let bounds = self.bounds;
-        let index = bounds.small_index_within(last_parent.0.extent());
-        let child = last_parent.get_child(index).as_parent()?;
-
-        if !visit.enter(bounds, child) {
-            return None;
-        }
+        let index = bounds.small_index_within(last_parent.get().extent());
+        let parent = last_parent.get().get_child(index).as_parent()?;
 
         let splits = self.split_list.levels[self.parents.len()];
-        self.parents.push(child);
-        self.bounds = self.bounds.split_extent(splits);
-        Some((self.bounds, child.get_child(0)))
+        let (all, index) = Self::visit(visit, parent, splits)?;
+        self.fully_entered_parents.set(self.parents.len() - 1, all);
+
+        self.parents.push(parent);
+        self.bounds = self.bounds.split_to_index(splits, index);
+        Some((self.bounds, parent.get().get_child(index)))
     }
 
     fn next_node(&mut self) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
         while let Some(&parent) = self.parents.last() {
-            if let Some(item) = self.next_neighbor(parent) {
-                return Some(item);
+            if self.fully_entered_parents[self.parents.len() - 1] {
+                if let Some(item) = self.next_neighbor(parent) {
+                    return Some(item);
+                }
             }
 
-            self.pop(parent.0.extent());
+            self.pop(parent.get().extent());
         }
 
         None
@@ -174,15 +173,31 @@ impl<'a, T: OctreeNode> RootEntered<'a, T> {
         &mut self,
         parent: ParentNodeRef<'a, T>,
     ) -> Option<(OctreeBounds, NodeRef<'a, T>)> {
-        let parent_extent = parent.0.extent();
+        let parent_extent = parent.get().extent();
         self.bounds.next_bounds_within(parent_extent).map(|bounds| {
             let index = bounds.small_index_within(parent_extent);
-            (bounds, parent.get_child(index))
+            (bounds, parent.get().get_child(index))
         })
     }
 
     fn pop(&mut self, parent_extent: OctreeExtent) {
         self.parents.pop();
         self.bounds = self.bounds.floor_to_extent(parent_extent);
+    }
+
+    fn visit(
+        mut visit: impl Visit<T>,
+        parent: ParentNodeRef<T>,
+        splits: OctreeSplits,
+    ) -> Option<(bool, u8)> {
+        match visit.enter(VisitNode {
+            node: parent,
+            min: UVec3::ZERO,
+            splits,
+        }) {
+            Enter::None => None,
+            Enter::Only { child } => Some((false, child)),
+            Enter::All => Some((true, 0)),
+        }
     }
 }
