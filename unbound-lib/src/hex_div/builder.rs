@@ -4,40 +4,40 @@ use arrayvec::ArrayVec;
 use derive_where::derive_where;
 
 use super::{
-    bounds::OctreeBounds,
-    extent::{OctreeExtent, OctreeSplitList, OctreeSplits},
-    OctreeNode,
+    bounds::Bounds,
+    extent::{Extent, SplitList, Splits},
+    HexDiv,
 };
 
 /// Allows building an [`OctreeNode`] incrementally.
-pub struct Builder<T: OctreeNode> {
-    bounds: OctreeBounds,
-    split_list: OctreeSplitList,
+pub struct Builder<T: HexDiv> {
+    bounds: Bounds,
+    split_list: SplitList,
     /// Contains all nodes that were built.
     nodes: Vec<T>,
     /// Contains all parent nodes that are not yet built.
-    parents: ArrayVec<T::Parent, { OctreeSplitList::MAX }>,
+    parents: ArrayVec<T::Parent, { SplitList::MAX }>,
 }
 
-impl<T: OctreeNode> Builder<T> {
-    pub fn new(extent: OctreeExtent) -> Self {
+impl<T: HexDiv> Builder<T> {
+    pub fn new(extent: Extent) -> Self {
         Self::with_scratch(extent, Default::default())
     }
 
     /// Returns the bounds that will be process by the next call to [`Self::step`].
-    pub fn bounds(&self) -> OctreeBounds {
+    pub fn bounds(&self) -> Bounds {
         self.bounds
     }
 
-    pub fn step(&mut self, build: impl FnOnce(OctreeBounds) -> BuildAction<T>) -> Option<T> {
+    pub fn step(&mut self, build: impl FnOnce(Bounds) -> BuildAction<T>) -> Option<T> {
         self.step_with_scratch(build).map(|(node, _)| node)
     }
 
-    pub fn build(&mut self, build: impl FnMut(OctreeBounds) -> BuildAction<T>) -> T {
+    pub fn build(&mut self, build: impl FnMut(Bounds) -> BuildAction<T>) -> T {
         self.build_with_scratch(build).0
     }
 
-    pub fn with_scratch(extent: OctreeExtent, scratch: Scratch<T>) -> Self {
+    pub fn with_scratch(extent: Extent, scratch: Scratch<T>) -> Self {
         Self {
             bounds: extent.into(),
             split_list: extent.to_split_list(),
@@ -48,7 +48,7 @@ impl<T: OctreeNode> Builder<T> {
 
     pub fn step_with_scratch(
         &mut self,
-        build: impl FnOnce(OctreeBounds) -> BuildAction<T>,
+        build: impl FnOnce(Bounds) -> BuildAction<T>,
     ) -> Option<(T, Scratch<T>)> {
         match build(self.bounds) {
             BuildAction::Fill(leaf) => self.push_node(T::new(self.bounds.extent(), leaf)),
@@ -62,7 +62,7 @@ impl<T: OctreeNode> Builder<T> {
 
     pub fn build_with_scratch(
         &mut self,
-        mut build: impl FnMut(OctreeBounds) -> BuildAction<T>,
+        mut build: impl FnMut(Bounds) -> BuildAction<T>,
     ) -> (T, Scratch<T>) {
         loop {
             if let Some(result) = self.step_with_scratch(&mut build) {
@@ -98,7 +98,7 @@ impl<T: OctreeNode> Builder<T> {
         }
     }
 
-    fn push_parent(&mut self, parent: <T as OctreeNode>::Parent) {
+    fn push_parent(&mut self, parent: <T as HexDiv>::Parent) {
         let splits = self.split_list.level(self.parents.len());
         self.bounds = self.bounds.split_extent(splits);
         self.parents.push(parent);
@@ -112,7 +112,7 @@ impl<T: OctreeNode> Builder<T> {
     }
 }
 
-pub enum BuildAction<T: OctreeNode> {
+pub enum BuildAction<T: HexDiv> {
     /// Fills the bounds with the given value.
     ///
     /// This is just a convenience for [`BuildAction::Node`] without having to pass the extent.
@@ -143,27 +143,27 @@ impl<T> std::fmt::Debug for Scratch<T> {
 
 impl<T> Scratch<T> {
     /// Allocates enough [`Scratch`] space, so that no further allocations are necessary.
-    pub fn with_capacity_for(extent: OctreeExtent) -> Self {
+    pub fn with_capacity_for(extent: Extent) -> Self {
         Self {
             nodes: Vec::with_capacity(scratch_node_capacity_for(extent)),
         }
     }
 }
 
-const fn scratch_node_capacity_for(extent: OctreeExtent) -> usize {
+const fn scratch_node_capacity_for(extent: Extent) -> usize {
     let (full_splits, rest) = extent.full_splits_and_rest();
-    full_splits as usize * (OctreeSplits::MAX_VOLUME_USIZE - 1) + (1 << rest) - 1
+    full_splits as usize * (Splits::MAX_VOLUME_USIZE - 1) + (1 << rest) - 1
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::octree::node::bool::Node;
+    use crate::hex_div::node::bool::Node;
 
     /// Builds an octree that only contains a single `true` at [`OctreeBounds::MAX_POINT`].
     ///
     /// This has the effect of requiring the maximum possible amount of capacity inside `scratch`.
-    fn build_with_max_capacity(extent: OctreeExtent, scratch: Scratch<Node>) -> Scratch<Node> {
+    fn build_with_max_capacity(extent: Extent, scratch: Scratch<Node>) -> Scratch<Node> {
         let max_point = extent.size() - 1;
         let (_, scratch) =
             Builder::<Node>::with_scratch(extent, scratch).build_with_scratch(|bounds| {
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn scratch_with_max_capacity_does_not_allocate() {
-        const EXTENT: OctreeExtent = OctreeExtent::MAX;
+        const EXTENT: Extent = Extent::MAX;
 
         let scratch = Scratch::with_capacity_for(EXTENT);
         let initial_capacity = scratch.nodes.capacity();
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn scratch_nodes_max_capacity_cannot_be_reduced() {
-        const EXTENT: OctreeExtent = OctreeExtent::MAX;
+        const EXTENT: Extent = Extent::MAX;
 
         // try with one less scratch space and ensure it allocates
         const TOO_SMALL_CAPACITY: usize = scratch_node_capacity_for(EXTENT) - 1;
