@@ -18,6 +18,8 @@ jobs:
         name: Install alsa and udev
         run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup update --no-self-update
       - uses: Swatinem/rust-cache@v2
       - name: clippy
         run: cargo clippy --workspace --all-targets --verbose -- -D warnings
