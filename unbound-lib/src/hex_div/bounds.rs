@@ -1,22 +1,22 @@
 use glam::UVec3;
 
-use super::extent::{OctreeExtent, OctreeSplits};
+use super::extent::{Extent, Splits};
 use crate::math::bounds::UBounds3;
 
 /// The location of a node within an octree.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct OctreeBounds {
+pub struct Bounds {
     /// The position within the octree where the bounds start.
     ///
     /// Must be a multiple of [`Self::extent`] and at most [`i32::MAX`].
     min: UVec3,
     /// The extent of the bounds.
-    extent: OctreeExtent,
+    extent: Extent,
 }
 
-impl OctreeBounds {
+impl Bounds {
     pub const MIN_POINT: UVec3 = UVec3::ZERO;
-    pub const MAX_POINT: UVec3 = OctreeExtent::MAX.size().wrapping_sub(UVec3::ONE);
+    pub const MAX_POINT: UVec3 = Extent::MAX.size().wrapping_sub(UVec3::ONE);
 
     /// Returns whether the given `min` and `extent` would form a valid [`OctreeBounds`].
     ///
@@ -24,8 +24,8 @@ impl OctreeBounds {
     ///
     /// Since [`OctreeExtent`] is limited to powers of two, this can easily be checked by making
     /// sure the lower bits are set to zero.
-    pub const fn is_valid(min: UVec3, extent: OctreeExtent) -> bool {
-        const MAX: u32 = OctreeBounds::MAX_POINT.x;
+    pub const fn is_valid(min: UVec3, extent: Extent) -> bool {
+        const MAX: u32 = Bounds::MAX_POINT.x;
         let max = min.saturating_add(extent.size());
         let floored = Self::floor_min_to_extent(min, extent);
         (max.x <= MAX && max.y <= MAX && max.z <= MAX)
@@ -36,7 +36,7 @@ impl OctreeBounds {
     ///
     /// Since [`OctreeExtent`] is limited to powers of two, this can easily be achieved by clearing
     /// some of the lower bits.
-    pub const fn floor_min_to_extent(mut min: UVec3, extent: OctreeExtent) -> UVec3 {
+    pub const fn floor_min_to_extent(mut min: UVec3, extent: Extent) -> UVec3 {
         let bits_to_clear = extent.splits();
         min.x &= u32::MAX << bits_to_clear[0];
         min.y &= u32::MAX << bits_to_clear[1];
@@ -47,7 +47,7 @@ impl OctreeBounds {
     /// Constructs an [`OctreeBounds`] with the given `min` and `extent`.
     ///
     /// If `debug_assertions` are enabled, this panics if the given values are invalid.
-    pub const fn new(min: UVec3, extent: OctreeExtent) -> Self {
+    pub const fn new(min: UVec3, extent: Extent) -> Self {
         debug_assert!(Self::is_valid(min, extent));
         Self { min, extent }
     }
@@ -55,7 +55,7 @@ impl OctreeBounds {
     /// Constructs an [`OctreeBounds`] with the given `min` and `extent`.
     ///
     /// Returns [`None`] if the given values do not form a [valid](Self::is_valid) [`OctreeBounds`].
-    pub const fn checked_new(min: UVec3, extent: OctreeExtent) -> Option<Self> {
+    pub const fn checked_new(min: UVec3, extent: Extent) -> Option<Self> {
         if Self::is_valid(min, extent) {
             Some(Self { min, extent })
         } else {
@@ -63,7 +63,7 @@ impl OctreeBounds {
         }
     }
 
-    pub fn new_floored(min: UVec3, extent: OctreeExtent) -> Self {
+    pub fn new_floored(min: UVec3, extent: Extent) -> Self {
         Self {
             min: Self::floor_min_to_extent(min, extent),
             extent,
@@ -71,7 +71,7 @@ impl OctreeBounds {
     }
 
     /// Constructs an [`OctreeBounds`] with the specified `extent` at the origin.
-    pub const fn from_extent(extent: OctreeExtent) -> Self {
+    pub const fn from_extent(extent: Extent) -> Self {
         Self {
             min: UVec3::ZERO,
             extent,
@@ -82,14 +82,14 @@ impl OctreeBounds {
     ///
     /// If `debug_assertions` are enabled, this panics if the given `point` is invalid.
     pub const fn from_point(point: UVec3) -> Self {
-        Self::new(point, OctreeExtent::ONE)
+        Self::new(point, Extent::ONE)
     }
 
     /// Returns whether this [`OctreeBounds`] covers a single point.
     ///
     /// In other words, if [`Self::extent`] is [`OctreeExtent::ONE`].
     pub const fn is_point(self) -> bool {
-        matches!(self.extent, OctreeExtent::ONE)
+        matches!(self.extent, Extent::ONE)
     }
 
     /// If the bounds only cover a single point, returns that point.
@@ -118,7 +118,7 @@ impl OctreeBounds {
     }
 
     /// The extent of the bounds.
-    pub const fn extent(self) -> OctreeExtent {
+    pub const fn extent(self) -> Extent {
         self.extent
     }
 
@@ -151,7 +151,7 @@ impl OctreeBounds {
     }
 
     /// Updates the extent and rounds `min` down so that it remains a multiple of `extent`.
-    pub fn with_extent_and_floor(mut self, extent: OctreeExtent) -> Self {
+    pub fn with_extent_and_floor(mut self, extent: Extent) -> Self {
         self.min = Self::floor_min_to_extent(self.min, extent);
         self.extent = extent;
         self
@@ -162,7 +162,7 @@ impl OctreeBounds {
     /// Iterates in x, y, z order.
     ///
     /// Returns [`None`] if the extent cannot be advanced any further.
-    pub const fn next_min_within(self, splits: OctreeSplits) -> Option<UVec3> {
+    pub const fn next_min_within(self, splits: Splits) -> Option<UVec3> {
         let inner_splits = self.extent.splits();
 
         let mut min = self.min;
@@ -194,7 +194,7 @@ impl OctreeBounds {
     }
 
     /// Returns the index of these bounds within the given `extent`.
-    pub const fn index_within(self, extent: OctreeExtent) -> u128 {
+    pub const fn index_within(self, extent: Extent) -> u128 {
         let ([x_bit_width, y_bit_width], [x, y, z]) = self.small_index_helper(extent);
         x as u128 | (y as u128) << x_bit_width | (z as u128) << y_bit_width
     }
@@ -202,7 +202,7 @@ impl OctreeBounds {
     /// Returns the index of these bounds within the given `extent` as a [`u8`].
     ///
     /// If `debug_assertions` are enabled, this panics if the result does not fit in a [`u8`].
-    pub fn small_index_within(self, extent: OctreeExtent) -> u8 {
+    pub fn small_index_within(self, extent: Extent) -> u8 {
         if cfg!(debug_assertions) {
             self.index_within(extent)
                 .try_into()
@@ -213,7 +213,7 @@ impl OctreeBounds {
         }
     }
 
-    const fn small_index_helper(self, extent: OctreeExtent) -> ([u8; 2], [u32; 3]) {
+    const fn small_index_helper(self, extent: Extent) -> ([u8; 2], [u32; 3]) {
         let inner_bit_offsets = self.extent.splits();
         let outer_bit_offsets = extent.splits();
 
@@ -233,26 +233,26 @@ impl OctreeBounds {
     /// # Panics
     ///
     /// Panics if [`Self::extent`] cannot be split `splits` times.
-    pub fn split_extent(mut self, splits: OctreeSplits) -> Self {
+    pub fn split_extent(mut self, splits: Splits) -> Self {
         self.extent = self.extent.split(splits);
         self
     }
 
-    pub fn next_bounds_within(self, splits: OctreeSplits) -> Option<Self> {
+    pub fn next_bounds_within(self, splits: Splits) -> Option<Self> {
         self.next_min_within(splits).map(|min| Self {
             min,
             extent: self.extent,
         })
     }
 
-    pub fn floor_to_extent(self, extent: OctreeExtent) -> Self {
+    pub fn floor_to_extent(self, extent: Extent) -> Self {
         Self {
             min: Self::floor_min_to_extent(self.min, extent),
             extent,
         }
     }
 
-    pub fn split_to_index(mut self, splits: OctreeSplits, index: u8) -> OctreeBounds {
+    pub fn split_to_index(mut self, splits: Splits, index: u8) -> Bounds {
         self.extent = self.extent.split(splits);
 
         let indices = splits.split_index(index);
@@ -266,8 +266,8 @@ impl OctreeBounds {
     }
 }
 
-impl From<OctreeExtent> for OctreeBounds {
-    fn from(extent: OctreeExtent) -> Self {
+impl From<Extent> for Bounds {
+    fn from(extent: Extent) -> Self {
         Self::from_extent(extent)
     }
 }

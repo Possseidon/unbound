@@ -5,11 +5,11 @@ use glam::{uvec3, UVec3};
 /// This basically stores the maximum size of the octree in log2. This also means, that only
 /// sizes that are a power of two can be stored.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub struct OctreeExtent {
+pub struct Extent {
     splits: [u8; 3],
 }
 
-impl OctreeExtent {
+impl Extent {
     /// The smallest subdivision of an octree that can no longer be split.
     pub const ONE: Self = Self { splits: [0; 3] };
 
@@ -45,7 +45,7 @@ impl OctreeExtent {
                 1 => Some(0),
                 _ => {
                     let rounded = (value - 1).ilog2() + 1;
-                    if rounded <= OctreeExtent::MAX_SPLITS as u32 {
+                    if rounded <= Extent::MAX_SPLITS as u32 {
                         Some(rounded as u8)
                     } else {
                         None
@@ -92,8 +92,8 @@ impl OctreeExtent {
     pub const fn full_splits_and_rest(self) -> (u8, u8) {
         let total_splits = self.total_splits();
         (
-            total_splits / OctreeSplits::MAX_TOTAL,
-            total_splits % OctreeSplits::MAX_TOTAL,
+            total_splits / Splits::MAX_TOTAL,
+            total_splits % Splits::MAX_TOTAL,
         )
     }
 
@@ -103,14 +103,14 @@ impl OctreeExtent {
     /// [`OctreeSplits::MAX_TOTAL`] splits along any combination of axes. All remaining entries are
     /// guaranteed to contain exactly [`OctreeSplits::MAX_TOTAL`] splits. The remaining entries
     /// contain no splits, i.e. [`OctreeSplits::NONE`].
-    pub fn to_split_list(self) -> OctreeSplitList {
-        let mut buffer = OctreeSplitList::default();
+    pub fn to_split_list(self) -> SplitList {
+        let mut buffer = SplitList::default();
 
-        let mut index = self.total_splits().div_ceil(OctreeSplits::MAX_TOTAL);
+        let mut index = self.total_splits().div_ceil(Splits::MAX_TOTAL);
         let mut remaining_splits = self.splits;
-        let mut current = OctreeSplits::NONE;
+        let mut current = Splits::NONE;
 
-        let mut remaining_splits_for_layer = OctreeSplits::MAX_TOTAL;
+        let mut remaining_splits_for_layer = Splits::MAX_TOTAL;
 
         while remaining_splits != [0; 3] {
             for (i, remaining_split) in remaining_splits.iter_mut().enumerate() {
@@ -122,14 +122,14 @@ impl OctreeExtent {
                     if remaining_splits_for_layer == 0 {
                         index -= 1;
                         buffer.levels[usize::from(index)] = current;
-                        remaining_splits_for_layer = OctreeSplits::MAX_TOTAL;
-                        current = OctreeSplits::NONE;
+                        remaining_splits_for_layer = Splits::MAX_TOTAL;
+                        current = Splits::NONE;
                     }
                 }
             }
         }
 
-        if current != OctreeSplits::NONE {
+        if current != Splits::NONE {
             index -= 1;
             buffer.levels[usize::from(index)] = current;
         }
@@ -146,7 +146,7 @@ impl OctreeExtent {
     /// # Panics
     ///
     /// Panics if the [`OctreeExtent`] cannot be split `splits` times.
-    pub fn split(self, splits: OctreeSplits) -> Self {
+    pub fn split(self, splits: Splits) -> Self {
         const MSG: &str = "extent should be splittable";
         Self {
             splits: [
@@ -164,7 +164,7 @@ impl OctreeExtent {
     /// # Panics
     ///
     /// Panics if the new [`OctreeExtent`] exceeds [`Self::MAX`].
-    pub fn unsplit(self, splits: OctreeSplits) -> Self {
+    pub fn unsplit(self, splits: Splits) -> Self {
         Self::from_splits([
             self.splits[0] + splits.splits[0],
             self.splits[1] + splits.splits[1],
@@ -174,7 +174,7 @@ impl OctreeExtent {
     }
 }
 
-impl From<OctreeExtentCompact> for OctreeExtent {
+impl From<OctreeExtentCompact> for Extent {
     fn from(value: OctreeExtentCompact) -> Self {
         Self {
             splits: [
@@ -191,11 +191,11 @@ impl From<OctreeExtentCompact> for OctreeExtent {
 /// Has a similar representation to [`OctreeExtent`] itself, but is guaranteed to contain at most
 /// `6` [`Self::total`] splits and therefore also a [`Self::volume`] of `64`.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub struct OctreeSplits {
+pub struct Splits {
     splits: [u8; 3],
 }
 
-impl OctreeSplits {
+impl Splits {
     /// An [`OctreeSplits`] without any splits.
     pub const NONE: Self = Self { splits: [0; 3] };
 
@@ -252,18 +252,18 @@ impl OctreeSplits {
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub struct OctreeSplitList {
-    levels: [OctreeSplits; Self::MAX],
+pub struct SplitList {
+    levels: [Splits; Self::MAX],
 }
 
-impl OctreeSplitList {
+impl SplitList {
     /// The maximum number of splits that can be stored in this buffer.
     ///
     /// This is also the maximum number of splits that are possible in total for an
     /// [`OctreeExtent::MAX`].
     pub const MAX: usize = 16;
 
-    pub const fn level(self, index: usize) -> OctreeSplits {
+    pub const fn level(self, index: usize) -> Splits {
         self.levels[index]
     }
 }
@@ -280,8 +280,8 @@ pub struct OctreeExtentCompact {
     splits: u16,
 }
 
-impl From<OctreeExtent> for OctreeExtentCompact {
-    fn from(value: OctreeExtent) -> Self {
+impl From<Extent> for OctreeExtentCompact {
+    fn from(value: Extent) -> Self {
         Self {
             splits: (value.splits[0] as u16) << 10
                 | (value.splits[1] as u16) << 5
@@ -293,7 +293,7 @@ impl From<OctreeExtent> for OctreeExtentCompact {
 impl std::fmt::Debug for OctreeExtentCompact {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("OctreeExtentCompact")
-            .field("splits", &OctreeExtent::from(*self).splits)
+            .field("splits", &Extent::from(*self).splits)
             .finish()
     }
 }
@@ -304,18 +304,16 @@ mod tests {
 
     #[test]
     fn octree_extent_to_splits() {
-        let splits = OctreeExtent::from_splits([5, 10, 4])
-            .unwrap()
-            .to_split_list();
+        let splits = Extent::from_splits([5, 10, 4]).unwrap().to_split_list();
 
         let mut iter = splits.levels.into_iter();
-        assert_eq!(iter.next(), Some(OctreeSplits { splits: [0, 1, 0] }));
-        assert_eq!(iter.next(), Some(OctreeSplits { splits: [1, 5, 0] }));
-        assert_eq!(iter.next(), Some(OctreeSplits { splits: [2, 2, 2] }));
-        assert_eq!(iter.next(), Some(OctreeSplits { splits: [2, 2, 2] }));
+        assert_eq!(iter.next(), Some(Splits { splits: [0, 1, 0] }));
+        assert_eq!(iter.next(), Some(Splits { splits: [1, 5, 0] }));
+        assert_eq!(iter.next(), Some(Splits { splits: [2, 2, 2] }));
+        assert_eq!(iter.next(), Some(Splits { splits: [2, 2, 2] }));
 
         for rest in iter {
-            assert_eq!(rest, OctreeSplits { splits: [0, 0, 0] });
+            assert_eq!(rest, Splits { splits: [0, 0, 0] });
         }
     }
 }

@@ -1,7 +1,7 @@
 use derive_where::derive_where;
 use glam::UVec3;
 
-use super::{bounds::OctreeBounds, extent::OctreeSplits, OctreeNode, ParentNodeRef};
+use super::{bounds::Bounds, extent::Splits, HexDiv, ParentNodeRef};
 use crate::math::bounds::UBounds3;
 
 /// Iterates over all nodes in the octree.
@@ -10,12 +10,12 @@ pub fn all<T>(_: VisitNode<T>) -> Enter {
 }
 
 /// Skips over nodes that lie outside of `target`.
-pub fn within<T: OctreeNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
+pub fn within<T: HexDiv>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
     move |node| Enter::within(node.bounds(), node.splits, target)
 }
 
 /// Skips over nodes that lie outside or inside `target`.
-pub fn until<T: OctreeNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
+pub fn until<T: HexDiv>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
     move |node| Enter::until(node.bounds(), node.splits, target)
 }
 
@@ -24,24 +24,24 @@ pub fn until<T: OctreeNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter 
 pub struct VisitNode<'a, T> {
     pub(super) node: ParentNodeRef<'a, T>,
     pub(super) min: UVec3,
-    pub(super) splits: OctreeSplits,
+    pub(super) splits: Splits,
 }
 
-impl<'a, T: OctreeNode> VisitNode<'a, T> {
+impl<'a, T: HexDiv> VisitNode<'a, T> {
     /// The node that is being visited.
     pub fn node(self) -> ParentNodeRef<'a, T> {
         self.node
     }
 
     /// The bounds of [`Self::node`].
-    pub fn bounds(self) -> OctreeBounds {
-        OctreeBounds::new(self.min, self.node.get().extent())
+    pub fn bounds(self) -> Bounds {
+        Bounds::new(self.min, self.node.get().extent())
     }
 
     /// Describes the layout of [`Self::node`]'s children.
     ///
     /// [`OctreeSplits::NONE`] for leaf nodes.
-    pub fn splits(self) -> OctreeSplits {
+    pub fn splits(self) -> Splits {
         self.splits
     }
 }
@@ -56,15 +56,15 @@ pub enum Enter {
 }
 
 impl Enter {
-    fn within(bounds: OctreeBounds, splits: OctreeSplits, target: UBounds3) -> Self {
+    fn within(bounds: Bounds, splits: Splits, target: UBounds3) -> Self {
         if bounds.to_ubounds3().is_disjoint(target) {
             return Self::None;
         }
 
         let child_extent = bounds.extent().split(splits);
 
-        let child_bounds = OctreeBounds::new_floored(target.lower(), child_extent);
-        let upper_bounds_min = OctreeBounds::floor_min_to_extent(target.upper() - 1, child_extent);
+        let child_bounds = Bounds::new_floored(target.lower(), child_extent);
+        let upper_bounds_min = Bounds::floor_min_to_extent(target.upper() - 1, child_extent);
         if child_bounds.min() != upper_bounds_min {
             return Self::All;
         }
@@ -74,7 +74,7 @@ impl Enter {
         }
     }
 
-    fn until(bounds: OctreeBounds, splits: OctreeSplits, target: UBounds3) -> Self {
+    fn until(bounds: Bounds, splits: Splits, target: UBounds3) -> Self {
         if target.encloses(bounds.to_ubounds3()) {
             return Self::None;
         }

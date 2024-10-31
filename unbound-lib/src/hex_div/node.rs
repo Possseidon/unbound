@@ -6,9 +6,9 @@ use arrayvec::ArrayVec;
 use derive_where::derive_where;
 
 use super::{
-    cache::{CacheInput, OctreeCache},
-    extent::{OctreeExtent, OctreeSplits},
-    NodeDataRef, NodeRef, OctreeNode,
+    cache::{Cache, CacheIn},
+    extent::{Extent, Splits},
+    HexDiv, NodeDataRef, NodeRef,
 };
 
 /// A node within an octree, either holding a leaf with a value of type `T` or more [`Node`]s.
@@ -32,11 +32,11 @@ use super::{
 #[derive_where(Hash, PartialEq, Eq; T, P)]
 pub struct Node<T, P = (), C = NoCache>(Repr<T, P, C>);
 
-impl<T, P, C> OctreeNode for Node<T, P, C>
+impl<T, P, C> HexDiv for Node<T, P, C>
 where
     T: Clone + Eq,
     P: Clone,
-    C: for<'a> OctreeCache<'a, &'a T, Ref = &'a C>,
+    C: Clone + for<'a> Cache<'a, &'a T, Ref = &'a C>,
 {
     type Leaf = T;
 
@@ -45,7 +45,7 @@ where
     where
         T: 'a;
 
-    type LeavesBuilder = ArrayVec<T, { OctreeSplits::MAX_VOLUME_USIZE }>;
+    type LeavesBuilder = ArrayVec<T, { Splits::MAX_VOLUME_USIZE }>;
 
     type Parent = P;
 
@@ -54,14 +54,14 @@ where
     where
         T: 'a;
 
-    fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self {
+    fn new(extent: Extent, leaf: Self::Leaf) -> Self {
         Self(Repr::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
         total_splits: u8,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
+        extent: Extent,
+        child_extent: Extent,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
@@ -78,9 +78,9 @@ where
 
     fn from_nodes_unchecked(
         total_splits: u8,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
-        nodes: ArrayVec<Self, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        extent: Extent,
+        child_extent: Extent,
+        nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
         Self(match total_splits {
@@ -94,7 +94,7 @@ where
         })
     }
 
-    fn extent(&self) -> OctreeExtent {
+    fn extent(&self) -> Extent {
         match self.0 {
             Repr::Leaf(extent, _)
             | Repr::Leaves1(extent, _)
@@ -161,13 +161,10 @@ where
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NoCache;
 
-impl<'a, T> OctreeCache<'a, T> for NoCache {
+impl<'a, T> Cache<'a, T> for NoCache {
     type Ref = &'a NoCache;
 
-    fn compute_cache(
-        _: OctreeExtent,
-        _: impl IntoIterator<Item = CacheInput<'a, T, Self>>,
-    ) -> Self {
+    fn compute_cache(_: Extent, _: impl IntoIterator<Item = CacheIn<'a, T, Self>>) -> Self {
         Self
     }
 }
@@ -175,42 +172,40 @@ impl<'a, T> OctreeCache<'a, T> for NoCache {
 #[derive(Clone, Debug)]
 #[derive_where(Hash, PartialEq, Eq; T, P)]
 enum Repr<T, P, C> {
-    Leaf(OctreeExtent, T),
-    Leaves1(OctreeExtent, Arc<LeavesNode<T, 2, P, C>>),
-    Leaves2(OctreeExtent, Arc<LeavesNode<T, 4, P, C>>),
-    Leaves3(OctreeExtent, Arc<LeavesNode<T, 8, P, C>>),
-    Leaves4(OctreeExtent, Arc<LeavesNode<T, 16, P, C>>),
-    Leaves5(OctreeExtent, Arc<LeavesNode<T, 32, P, C>>),
-    Leaves6(OctreeExtent, Arc<LeavesNode<T, 64, P, C>>),
-    Parent1(OctreeExtent, Arc<ParentNode<T, 2, P, C>>),
-    Parent2(OctreeExtent, Arc<ParentNode<T, 4, P, C>>),
-    Parent3(OctreeExtent, Arc<ParentNode<T, 8, P, C>>),
-    Parent4(OctreeExtent, Arc<ParentNode<T, 16, P, C>>),
-    Parent5(OctreeExtent, Arc<ParentNode<T, 32, P, C>>),
-    Parent6(OctreeExtent, Arc<ParentNode<T, 64, P, C>>),
+    Leaf(Extent, T),
+    Leaves1(Extent, Arc<LeavesNode<T, 2, P, C>>),
+    Leaves2(Extent, Arc<LeavesNode<T, 4, P, C>>),
+    Leaves3(Extent, Arc<LeavesNode<T, 8, P, C>>),
+    Leaves4(Extent, Arc<LeavesNode<T, 16, P, C>>),
+    Leaves5(Extent, Arc<LeavesNode<T, 32, P, C>>),
+    Leaves6(Extent, Arc<LeavesNode<T, 64, P, C>>),
+    Parent1(Extent, Arc<ParentNode<T, 2, P, C>>),
+    Parent2(Extent, Arc<ParentNode<T, 4, P, C>>),
+    Parent3(Extent, Arc<ParentNode<T, 8, P, C>>),
+    Parent4(Extent, Arc<ParentNode<T, 16, P, C>>),
+    Parent5(Extent, Arc<ParentNode<T, 32, P, C>>),
+    Parent6(Extent, Arc<ParentNode<T, 64, P, C>>),
 }
 
-type NewLeaves<T, const N: usize, P, C> =
-    fn(OctreeExtent, Arc<LeavesNode<T, N, P, C>>) -> Repr<T, P, C>;
+type NewLeaves<T, const N: usize, P, C> = fn(Extent, Arc<LeavesNode<T, N, P, C>>) -> Repr<T, P, C>;
 
-type NewParent<T, const N: usize, P, C> =
-    fn(OctreeExtent, Arc<ParentNode<T, N, P, C>>) -> Repr<T, P, C>;
+type NewParent<T, const N: usize, P, C> = fn(Extent, Arc<ParentNode<T, N, P, C>>) -> Repr<T, P, C>;
 
 impl<T, P, C> Repr<T, P, C>
 where
     T: Clone + Eq,
     P: Clone,
-    C: for<'a> OctreeCache<'a, &'a T, Ref = &'a C>,
+    C: Clone + for<'a> Cache<'a, &'a T, Ref = &'a C>,
 {
     fn from_leaves<const N: usize>(
         new: NewLeaves<T, N, P, C>,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
-        leaves: ArrayVec<T, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        extent: Extent,
+        child_extent: Extent,
+        leaves: ArrayVec<T, { Splits::MAX_VOLUME_USIZE }>,
         parent: P,
     ) -> Self {
         let leaves = array_init::from_iter(leaves).expect("leaves should have correct length");
-        let cache = C::compute_cache(child_extent, leaves.iter().map(CacheInput::Leaf));
+        let cache = C::compute_cache(child_extent, leaves.iter().map(CacheIn::Leaf));
         new(
             extent,
             Arc::new(LeavesNode {
@@ -223,13 +218,13 @@ where
 
     fn from_nodes<const N: usize>(
         new: NewParent<T, N, P, C>,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
-        nodes: ArrayVec<Node<T, P, C>, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        extent: Extent,
+        child_extent: Extent,
+        nodes: ArrayVec<Node<T, P, C>, { Splits::MAX_VOLUME_USIZE }>,
         parent: P,
     ) -> Self {
         let children = array_init::from_iter(nodes).expect("leaves should have correct length");
-        let cache = C::compute_cache(child_extent, children.iter().map(CacheInput::from_node));
+        let cache = C::compute_cache(child_extent, children.iter().map(CacheIn::from_node));
         new(
             extent,
             Arc::new(ParentNode {

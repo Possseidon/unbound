@@ -5,10 +5,10 @@ use std::{
 
 use arrayvec::ArrayVec;
 
-use crate::octree::{
-    cache::{CacheInput, OctreeCache},
-    extent::{OctreeExtent, OctreeSplits},
-    NodeDataRef, NodeRef, OctreeNode,
+use crate::hex_div::{
+    cache::{Cache, CacheIn},
+    extent::{Extent, Splits},
+    HexDiv, NodeDataRef, NodeRef,
 };
 
 /// An octree node that stores [`bool`]s as single bits where it makes sense.
@@ -22,7 +22,7 @@ use crate::octree::{
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Node<P = ()>(Repr<P>);
 
-impl<P: Clone> OctreeNode for Node<P> {
+impl<P: Clone> HexDiv for Node<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -31,14 +31,14 @@ impl<P: Clone> OctreeNode for Node<P> {
 
     type Cache<'a> = NoCache;
 
-    fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self {
+    fn new(extent: Extent, leaf: Self::Leaf) -> Self {
         Self(Repr::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
         _total_splits: u8,
-        extent: OctreeExtent,
-        _child_extent: OctreeExtent,
+        extent: Extent,
+        _child_extent: Extent,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
@@ -47,9 +47,9 @@ impl<P: Clone> OctreeNode for Node<P> {
 
     fn from_nodes_unchecked(
         total_splits: u8,
-        extent: OctreeExtent,
-        _child_extent: OctreeExtent,
-        nodes: ArrayVec<Self, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        extent: Extent,
+        _child_extent: Extent,
+        nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
         Self(match total_splits {
@@ -63,7 +63,7 @@ impl<P: Clone> OctreeNode for Node<P> {
         })
     }
 
-    fn extent(&self) -> OctreeExtent {
+    fn extent(&self) -> Extent {
         match self.0 {
             Repr::Leaf(extent, _)
             | Repr::Leaves(extent, _, _)
@@ -125,7 +125,7 @@ impl<P: Clone> OctreeNode for Node<P> {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct NodeWithCount<P = ()>(ReprWithCount<P>);
 
-impl<P: Clone> OctreeNode for NodeWithCount<P> {
+impl<P: Clone> HexDiv for NodeWithCount<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -134,14 +134,14 @@ impl<P: Clone> OctreeNode for NodeWithCount<P> {
 
     type Cache<'a> = Count;
 
-    fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self {
+    fn new(extent: Extent, leaf: Self::Leaf) -> Self {
         Self(ReprWithCount::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
         _total_splits: u8,
-        extent: OctreeExtent,
-        _child_extent: OctreeExtent,
+        extent: Extent,
+        _child_extent: Extent,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
@@ -150,9 +150,9 @@ impl<P: Clone> OctreeNode for NodeWithCount<P> {
 
     fn from_nodes_unchecked(
         total_splits: u8,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
-        nodes: ArrayVec<Self, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        extent: Extent,
+        child_extent: Extent,
+        nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
         use ReprWithCount as Repr;
@@ -167,7 +167,7 @@ impl<P: Clone> OctreeNode for NodeWithCount<P> {
         })
     }
 
-    fn extent(&self) -> OctreeExtent {
+    fn extent(&self) -> Extent {
         match self.0 {
             ReprWithCount::Leaf(extent, _)
             | ReprWithCount::Leaves(extent, _, _)
@@ -224,7 +224,7 @@ impl<P: Clone> OctreeNode for NodeWithCount<P> {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct NodeWithLargeParent<P>(ReprWithLargeParent<P>);
 
-impl<P: Clone> OctreeNode for NodeWithLargeParent<P> {
+impl<P: Clone> HexDiv for NodeWithLargeParent<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -233,14 +233,14 @@ impl<P: Clone> OctreeNode for NodeWithLargeParent<P> {
 
     type Cache<'a> = NoCache;
 
-    fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self {
+    fn new(extent: Extent, leaf: Self::Leaf) -> Self {
         Self(ReprWithLargeParent::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
         _total_splits: u8,
-        extent: OctreeExtent,
-        _child_extent: OctreeExtent,
+        extent: Extent,
+        _child_extent: Extent,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
@@ -252,9 +252,9 @@ impl<P: Clone> OctreeNode for NodeWithLargeParent<P> {
 
     fn from_nodes_unchecked(
         total_splits: u8,
-        extent: OctreeExtent,
-        _child_extent: OctreeExtent,
-        nodes: ArrayVec<Self, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        extent: Extent,
+        _child_extent: Extent,
+        nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
         use ReprWithLargeParent as Repr;
@@ -269,7 +269,7 @@ impl<P: Clone> OctreeNode for NodeWithLargeParent<P> {
         })
     }
 
-    fn extent(&self) -> OctreeExtent {
+    fn extent(&self) -> Extent {
         match self.0 {
             ReprWithLargeParent::Leaf(extent, _)
             | ReprWithLargeParent::Leaves(extent, _)
@@ -322,7 +322,7 @@ impl<P: Clone> OctreeNode for NodeWithLargeParent<P> {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct NodeWithLargeParentAndCount<P>(ReprWithLargeParentAndCount<P>);
 
-impl<P: Clone> OctreeNode for NodeWithLargeParentAndCount<P> {
+impl<P: Clone> HexDiv for NodeWithLargeParentAndCount<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -331,14 +331,14 @@ impl<P: Clone> OctreeNode for NodeWithLargeParentAndCount<P> {
 
     type Cache<'a> = Count;
 
-    fn new(extent: OctreeExtent, leaf: Self::Leaf) -> Self {
+    fn new(extent: Extent, leaf: Self::Leaf) -> Self {
         Self(ReprWithLargeParentAndCount::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
         _total_splits: u8,
-        extent: OctreeExtent,
-        _child_extent: OctreeExtent,
+        extent: Extent,
+        _child_extent: Extent,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
@@ -350,9 +350,9 @@ impl<P: Clone> OctreeNode for NodeWithLargeParentAndCount<P> {
 
     fn from_nodes_unchecked(
         total_splits: u8,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
-        nodes: ArrayVec<Self, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        extent: Extent,
+        child_extent: Extent,
+        nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
         use ReprWithLargeParentAndCount as Repr;
@@ -367,7 +367,7 @@ impl<P: Clone> OctreeNode for NodeWithLargeParentAndCount<P> {
         })
     }
 
-    fn extent(&self) -> OctreeExtent {
+    fn extent(&self) -> Extent {
         match self.0 {
             ReprWithLargeParentAndCount::Leaf(extent, _)
             | ReprWithLargeParentAndCount::Leaves(extent, _)
@@ -425,13 +425,10 @@ impl<P: Clone> OctreeNode for NodeWithLargeParentAndCount<P> {
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NoCache;
 
-impl<'a, T> OctreeCache<'a, T> for NoCache {
+impl<'a, T> Cache<'a, T> for NoCache {
     type Ref = ();
 
-    fn compute_cache(
-        _: OctreeExtent,
-        _: impl IntoIterator<Item = CacheInput<'a, T, Self>>,
-    ) -> Self {
+    fn compute_cache(_: Extent, _: impl IntoIterator<Item = CacheIn<'a, T, Self>>) -> Self {
         Self
     }
 }
@@ -465,7 +462,7 @@ impl ExactSizeIterator for LeavesBuilder {}
 impl Extend<bool> for LeavesBuilder {
     fn extend<T: IntoIterator<Item = bool>>(&mut self, iter: T) {
         for item in iter {
-            if self.len == OctreeSplits::MAX_VOLUME {
+            if self.len == Splits::MAX_VOLUME {
                 panic!("capacity overflow");
             }
             if item {
@@ -488,20 +485,20 @@ impl FromIterator<bool> for LeavesBuilder {
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Count(pub u128);
 
-impl<'a> OctreeCache<'a, bool> for Count {
+impl<'a> Cache<'a, bool> for Count {
     type Ref = Count;
 
     fn compute_cache(
-        extent: OctreeExtent,
-        inputs: impl IntoIterator<Item = CacheInput<'a, bool, Self>>,
+        extent: Extent,
+        inputs: impl IntoIterator<Item = CacheIn<'a, bool, Self>>,
     ) -> Self {
         Self(
             inputs
                 .into_iter()
                 .map(|input| match input {
-                    CacheInput::Leaf(true) => extent.volume(),
-                    CacheInput::Leaf(false) => 0,
-                    CacheInput::Cache(Count(count)) => count,
+                    CacheIn::Leaf(true) => extent.volume(),
+                    CacheIn::Leaf(false) => 0,
+                    CacheIn::Cache(Count(count)) => count,
                 })
                 .sum(),
         )
@@ -510,21 +507,21 @@ impl<'a> OctreeCache<'a, bool> for Count {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 enum Repr<P> {
-    Leaf(OctreeExtent, bool),
-    Leaves(OctreeExtent, P, u64),
-    Parent1(OctreeExtent, P, Arc<[Node<P>; 2]>),
-    Parent2(OctreeExtent, P, Arc<[Node<P>; 4]>),
-    Parent3(OctreeExtent, P, Arc<[Node<P>; 8]>),
-    Parent4(OctreeExtent, P, Arc<[Node<P>; 16]>),
-    Parent5(OctreeExtent, P, Arc<[Node<P>; 32]>),
-    Parent6(OctreeExtent, P, Arc<[Node<P>; 64]>),
+    Leaf(Extent, bool),
+    Leaves(Extent, P, u64),
+    Parent1(Extent, P, Arc<[Node<P>; 2]>),
+    Parent2(Extent, P, Arc<[Node<P>; 4]>),
+    Parent3(Extent, P, Arc<[Node<P>; 8]>),
+    Parent4(Extent, P, Arc<[Node<P>; 16]>),
+    Parent5(Extent, P, Arc<[Node<P>; 32]>),
+    Parent6(Extent, P, Arc<[Node<P>; 64]>),
 }
 
 impl<P> Repr<P> {
     fn from_nodes<const N: usize>(
-        new: fn(OctreeExtent, P, Arc<[Node<P>; N]>) -> Self,
-        extent: OctreeExtent,
-        nodes: ArrayVec<Node<P>, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        new: fn(Extent, P, Arc<[Node<P>; N]>) -> Self,
+        extent: Extent,
+        nodes: ArrayVec<Node<P>, { Splits::MAX_VOLUME_USIZE }>,
         parent: P,
     ) -> Self {
         let children = array_init::from_iter(nodes).expect("leaves should have correct length");
@@ -534,26 +531,26 @@ impl<P> Repr<P> {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 enum ReprWithCount<P> {
-    Leaf(OctreeExtent, bool),
-    Leaves(OctreeExtent, P, u64),
-    Parent1(OctreeExtent, P, Arc<ParentNodeWithCount<2, P>>),
-    Parent2(OctreeExtent, P, Arc<ParentNodeWithCount<4, P>>),
-    Parent3(OctreeExtent, P, Arc<ParentNodeWithCount<8, P>>),
-    Parent4(OctreeExtent, P, Arc<ParentNodeWithCount<16, P>>),
-    Parent5(OctreeExtent, P, Arc<ParentNodeWithCount<32, P>>),
-    Parent6(OctreeExtent, P, Arc<ParentNodeWithCount<64, P>>),
+    Leaf(Extent, bool),
+    Leaves(Extent, P, u64),
+    Parent1(Extent, P, Arc<ParentNodeWithCount<2, P>>),
+    Parent2(Extent, P, Arc<ParentNodeWithCount<4, P>>),
+    Parent3(Extent, P, Arc<ParentNodeWithCount<8, P>>),
+    Parent4(Extent, P, Arc<ParentNodeWithCount<16, P>>),
+    Parent5(Extent, P, Arc<ParentNodeWithCount<32, P>>),
+    Parent6(Extent, P, Arc<ParentNodeWithCount<64, P>>),
 }
 
 impl<P: Clone> ReprWithCount<P> {
     fn from_nodes<const N: usize>(
-        new: fn(OctreeExtent, P, Arc<ParentNodeWithCount<N, P>>) -> Self,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
-        nodes: ArrayVec<NodeWithCount<P>, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        new: fn(Extent, P, Arc<ParentNodeWithCount<N, P>>) -> Self,
+        extent: Extent,
+        child_extent: Extent,
+        nodes: ArrayVec<NodeWithCount<P>, { Splits::MAX_VOLUME_USIZE }>,
         parent: P,
     ) -> Self {
         let children = array_init::from_iter(nodes).expect("leaves should have correct length");
-        let count = Count::compute_cache(child_extent, children.iter().map(CacheInput::from_node));
+        let count = Count::compute_cache(child_extent, children.iter().map(CacheIn::from_node));
         new(
             extent,
             parent,
@@ -586,21 +583,21 @@ impl<const N: usize, P: Hash> Hash for ParentNodeWithCount<N, P> {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 enum ReprWithLargeParent<P> {
-    Leaf(OctreeExtent, bool),
-    Leaves(OctreeExtent, Arc<(u64, P)>),
-    Parent1(OctreeExtent, Arc<LargeParentNode<2, P>>),
-    Parent2(OctreeExtent, Arc<LargeParentNode<4, P>>),
-    Parent3(OctreeExtent, Arc<LargeParentNode<8, P>>),
-    Parent4(OctreeExtent, Arc<LargeParentNode<16, P>>),
-    Parent5(OctreeExtent, Arc<LargeParentNode<32, P>>),
-    Parent6(OctreeExtent, Arc<LargeParentNode<64, P>>),
+    Leaf(Extent, bool),
+    Leaves(Extent, Arc<(u64, P)>),
+    Parent1(Extent, Arc<LargeParentNode<2, P>>),
+    Parent2(Extent, Arc<LargeParentNode<4, P>>),
+    Parent3(Extent, Arc<LargeParentNode<8, P>>),
+    Parent4(Extent, Arc<LargeParentNode<16, P>>),
+    Parent5(Extent, Arc<LargeParentNode<32, P>>),
+    Parent6(Extent, Arc<LargeParentNode<64, P>>),
 }
 
 impl<P> ReprWithLargeParent<P> {
     fn from_nodes<const N: usize>(
-        new: fn(OctreeExtent, Arc<LargeParentNode<N, P>>) -> Self,
-        extent: OctreeExtent,
-        nodes: ArrayVec<NodeWithLargeParent<P>, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        new: fn(Extent, Arc<LargeParentNode<N, P>>) -> Self,
+        extent: Extent,
+        nodes: ArrayVec<NodeWithLargeParent<P>, { Splits::MAX_VOLUME_USIZE }>,
         parent: P,
     ) -> Self {
         let children = array_init::from_iter(nodes).expect("leaves should have correct length");
@@ -616,26 +613,26 @@ struct LargeParentNode<const N: usize, P> {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 enum ReprWithLargeParentAndCount<P> {
-    Leaf(OctreeExtent, bool),
-    Leaves(OctreeExtent, Arc<(u64, P)>),
-    Parent1(OctreeExtent, Arc<LargeParentNodeWithCount<2, P>>),
-    Parent2(OctreeExtent, Arc<LargeParentNodeWithCount<4, P>>),
-    Parent3(OctreeExtent, Arc<LargeParentNodeWithCount<8, P>>),
-    Parent4(OctreeExtent, Arc<LargeParentNodeWithCount<16, P>>),
-    Parent5(OctreeExtent, Arc<LargeParentNodeWithCount<32, P>>),
-    Parent6(OctreeExtent, Arc<LargeParentNodeWithCount<64, P>>),
+    Leaf(Extent, bool),
+    Leaves(Extent, Arc<(u64, P)>),
+    Parent1(Extent, Arc<LargeParentNodeWithCount<2, P>>),
+    Parent2(Extent, Arc<LargeParentNodeWithCount<4, P>>),
+    Parent3(Extent, Arc<LargeParentNodeWithCount<8, P>>),
+    Parent4(Extent, Arc<LargeParentNodeWithCount<16, P>>),
+    Parent5(Extent, Arc<LargeParentNodeWithCount<32, P>>),
+    Parent6(Extent, Arc<LargeParentNodeWithCount<64, P>>),
 }
 
 impl<P: Clone> ReprWithLargeParentAndCount<P> {
     fn from_nodes<const N: usize>(
-        new: fn(OctreeExtent, Arc<LargeParentNodeWithCount<N, P>>) -> Self,
-        extent: OctreeExtent,
-        child_extent: OctreeExtent,
-        nodes: ArrayVec<NodeWithLargeParentAndCount<P>, { OctreeSplits::MAX_VOLUME_USIZE }>,
+        new: fn(Extent, Arc<LargeParentNodeWithCount<N, P>>) -> Self,
+        extent: Extent,
+        child_extent: Extent,
+        nodes: ArrayVec<NodeWithLargeParentAndCount<P>, { Splits::MAX_VOLUME_USIZE }>,
         parent: P,
     ) -> Self {
         let children = array_init::from_iter(nodes).expect("leaves should have correct length");
-        let count = Count::compute_cache(child_extent, children.iter().map(CacheInput::from_node));
+        let count = Count::compute_cache(child_extent, children.iter().map(CacheIn::from_node));
         new(
             extent,
             Arc::new(LargeParentNodeWithCount {
