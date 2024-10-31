@@ -34,8 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        run: |
-          rustup update --no-self-update
-          rustup component add rustfmt --toolchain nightly
+        run: rustup toolchain install nightly --no-self-update --allow-downgrade -c rustfmt
       - name: fmt
         run: cargo +nightly fmt --all --check
