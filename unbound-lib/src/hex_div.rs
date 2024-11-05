@@ -10,7 +10,7 @@ use std::iter::{once, repeat_n};
 
 use arrayvec::ArrayVec;
 use cache::Cache;
-use derive_where::derive_where;
+use educe::Educe;
 use extent::{Extent, SplitList, Splits};
 use iter::Iter;
 use itertools::zip_eq;
@@ -254,8 +254,8 @@ pub trait HexDiv: Clone {
 pub type CacheRef<'a, T> = <<T as HexDiv>::Cache<'a> as Cache<'a, <T as HexDiv>::LeafRef<'a>>>::Ref;
 
 /// A reference to the data of a [`HexDiv`] node.
-#[derive_where(Clone, Copy)]
-#[derive_where(Debug, Hash, PartialEq, Eq; T::LeafRef<'a>, T::Parent, CacheRef<'a, T>)]
+#[derive(Educe)]
+#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum NodeDataRef<'a, T: HexDiv + 'a> {
     Leaf(T::LeafRef<'a>),
     Parent(&'a T::Parent, CacheRef<'a, T>),
@@ -273,9 +273,9 @@ impl<'a, T: HexDiv> NodeDataRef<'a, T> {
 
 /// A reference to a [`HexDiv`] node.
 ///
-/// [`Self::Leaf`] is used (exclusively) for virtual nodes used by leaves nodes.
-#[derive_where(Clone, Copy)]
-#[derive_where(Debug, Hash, PartialEq, Eq; T, T::LeafRef<'a>)]
+/// [`NodeRef::Leaf`] is used (exclusively) for virtual nodes used by leaves nodes.
+#[derive(Educe)]
+#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum NodeRef<'a, T: HexDiv + 'a> {
     Node(&'a T),
     Leaf(T::LeafRef<'a>),
@@ -299,8 +299,8 @@ impl<'a, T: HexDiv> NodeRef<'a, T> {
 }
 
 /// A reference to a [`HexDiv`] node that is known to have children.
-#[derive_where(Clone, Copy)]
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Educe)]
+#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct ParentNodeRef<'a, T>(&'a T);
 
 impl<'a, T: HexDiv> ParentNodeRef<'a, T> {
