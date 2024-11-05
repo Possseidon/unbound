@@ -1,7 +1,7 @@
 use std::mem::take;
 
 use arrayvec::ArrayVec;
-use derive_where::derive_where;
+use educe::Educe;
 
 use super::{
     bounds::Bounds,
@@ -176,7 +176,8 @@ pub enum BuildAction<T: HexDiv> {
 /// Contained [`Vec`]s are always empty, since they are only used to keep their allocated capacity.
 ///
 /// Intentionally does not implement [`Clone`], since cloning a [`Vec`] does not clone its capacity.
-#[derive_where(Default)]
+#[derive(Educe)]
+#[educe(Default)]
 pub struct Scratch<T> {
     nodes: Vec<T>,
 }

@@ -3,7 +3,7 @@ pub mod bool;
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
-use derive_where::derive_where;
+use educe::Educe;
 
 use super::{
     cache::{Cache, CacheIn},
@@ -28,8 +28,8 @@ use super::{
 /// adds up) and also improves type-safety.
 ///
 /// Additionally, parent nodes are stored in [`Arc`]s, making clones very cheap.
-#[derive(Clone, Debug)]
-#[derive_where(Hash, PartialEq, Eq; T, P)]
+#[derive(Educe)]
+#[educe(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Node<T, P = (), C = NoCache>(Repr<T, P, C>);
 
 impl<T, P, C> HexDiv for Node<T, P, C>
@@ -169,8 +169,8 @@ impl<'a, T> Cache<'a, T> for NoCache {
     }
 }
 
-#[derive(Clone, Debug)]
-#[derive_where(Hash, PartialEq, Eq; T, P)]
+#[derive(Educe)]
+#[educe(Clone, Debug, Hash, PartialEq, Eq)]
 enum Repr<T, P, C> {
     Leaf(Extent, T),
     Leaves1(Extent, Arc<LeavesNode<T, 2, P, C>>),
@@ -240,12 +240,12 @@ where
 ///
 /// Cached data is intentionally ignored by [`Eq`] and friends, since it does not carry any extra
 /// information that is not already present in `leaves`.
-#[derive(Clone, Copy, Debug)]
-#[derive_where(Hash, PartialEq, Eq; T, P)]
+#[derive(Educe)]
+#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 struct LeavesNode<T, const N: usize, P, C> {
     leaves: [T; N],
     parent: P,
-    #[derive_where(skip(EqHashOrd))]
+    #[educe(Hash(ignore), Eq(ignore))]
     cache: C,
 }
 
@@ -253,11 +253,11 @@ struct LeavesNode<T, const N: usize, P, C> {
 ///
 /// Cached data is intentionally ignored by [`Eq`] and friends, since it does not carry any extra
 /// information that is not already present in `leaves`.
-#[derive(Clone, Debug)]
-#[derive_where(Hash, PartialEq, Eq; T, P)]
+#[derive(Educe)]
+#[educe(Clone, Debug, Hash, PartialEq, Eq)]
 struct ParentNode<T, const N: usize, P, C> {
     children: [Node<T, P, C>; N],
     parent: P,
-    #[derive_where(skip(EqHashOrd))]
+    #[educe(Hash(ignore), Eq(ignore))]
     cache: C,
 }

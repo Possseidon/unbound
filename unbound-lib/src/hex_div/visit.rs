@@ -1,4 +1,4 @@
-use derive_where::derive_where;
+use educe::Educe;
 use glam::UVec3;
 
 use super::{bounds::Bounds, extent::Splits, HexDiv, ParentNodeRef};
@@ -19,8 +19,8 @@ pub fn until<T: HexDiv>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
     move |node| Enter::until(node.bounds(), node.splits, target)
 }
 
-#[derive_where(Clone, Copy)]
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Educe)]
+#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct VisitNode<'a, T> {
     pub(super) node: ParentNodeRef<'a, T>,
     pub(super) min: UVec3,
