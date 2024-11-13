@@ -174,8 +174,8 @@ impl Extent {
     }
 }
 
-impl From<OctreeExtentCompact> for Extent {
-    fn from(value: OctreeExtentCompact) -> Self {
+impl From<ExtentCompact> for Extent {
+    fn from(value: ExtentCompact) -> Self {
         Self {
             splits: [
                 (value.splits >> 10 & 0x1F) as u8,
@@ -273,14 +273,14 @@ impl SplitList {
 /// Slower than [`OctreeExtent`] but takes up 2 instead of 3 bytes of space, which doesn't sound
 /// like much, but can add up if stored in bulk and can potentially help with alignment.
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
-pub struct OctreeExtentCompact {
+pub struct ExtentCompact {
     /// Uses `5` bits per axis to store width, height and depth.
     ///
     /// The most significant bit is always set to `0`.
     splits: u16,
 }
 
-impl From<Extent> for OctreeExtentCompact {
+impl From<Extent> for ExtentCompact {
     fn from(value: Extent) -> Self {
         Self {
             splits: (value.splits[0] as u16) << 10
@@ -290,9 +290,9 @@ impl From<Extent> for OctreeExtentCompact {
     }
 }
 
-impl std::fmt::Debug for OctreeExtentCompact {
+impl std::fmt::Debug for ExtentCompact {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("OctreeExtentCompact")
+        f.debug_struct("ExtentCompact")
             .field("splits", &Extent::from(*self).splits)
             .finish()
     }
@@ -303,7 +303,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn octree_extent_to_splits() {
+    fn extent_to_splits() {
         let splits = Extent::from_splits([5, 10, 4]).unwrap().to_split_list();
 
         let mut iter = splits.levels.into_iter();
