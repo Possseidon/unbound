@@ -51,14 +51,14 @@ use itertools::zip_eq;
 ///
 /// [Octree]: https://en.wikipedia.org/wiki/Octree
 /// [Quadtree]: https://en.wikipedia.org/wiki/Quadtree
-pub trait HexDiv: Clone {
+pub trait HexDiv: Sized {
     /// The type of leaf values that this [`HexDiv`] holds.
     ///
-    /// Leaves must be:
+    /// To actually be useful, leaves must be:
     ///
     /// - [`Clone`] for when a leaf node is split into a parent node
     /// - [`Eq`] to know if a parent node can be merged back into a leaf node
-    type Leaf: Clone + Eq;
+    type Leaf;
 
     /// A reference to a [`HexDiv::Leaf`], usually just `&Self::Leaf`.
     ///
@@ -103,10 +103,11 @@ pub trait HexDiv: Clone {
         mut children: impl Iterator<Item = Self>,
         splits: Splits,
         parent: Self::Parent,
-    ) -> Self {
-        let total_splits = splits.total();
-        let count = 1 << total_splits;
-
+    ) -> Self
+    where
+        Self: Clone,
+        Self::Leaf: Clone + Eq,
+    {
         let first = children.next().expect("children should not be empty");
         let child_extent = first.extent();
         let extent = child_extent.unsplit(splits);
@@ -115,7 +116,7 @@ pub trait HexDiv: Clone {
         let children = children.inspect(|child| assert_eq!(child.extent(), child_extent));
 
         // ensure there is exactly count children
-        let mut children = zip_eq(1..count, children);
+        let mut children = zip_eq(1..splits.volume(), children);
 
         match first.into_leaf() {
             Ok(first) => {
@@ -123,7 +124,7 @@ pub trait HexDiv: Clone {
                     match child.into_leaf() {
                         Ok(leaf) => {
                             if leaf != first {
-                                let mut leaves = repeat_n(first, already_processed)
+                                let mut leaves = repeat_n(first, already_processed.into())
                                     .chain([leaf])
                                     .collect::<Self::LeavesBuilder>();
 
@@ -134,9 +135,8 @@ pub trait HexDiv: Clone {
                                         }
                                         Err(child) => {
                                             return Self::from_nodes_unchecked(
-                                                total_splits,
                                                 extent,
-                                                child_extent,
+                                                splits,
                                                 leaves
                                                     .into_iter()
                                                     .map(|leaf| Self::new(child_extent, leaf))
@@ -149,21 +149,14 @@ pub trait HexDiv: Clone {
                                     }
                                 }
 
-                                return Self::from_leaves_unchecked(
-                                    total_splits,
-                                    extent,
-                                    child_extent,
-                                    leaves,
-                                    parent,
-                                );
+                                return Self::from_leaves_unchecked(extent, splits, leaves, parent);
                             }
                         }
                         Err(child) => {
                             return Self::from_nodes_unchecked(
-                                total_splits,
                                 extent,
-                                child_extent,
-                                repeat_n(Self::new(child_extent, first), already_processed)
+                                splits,
+                                repeat_n(Self::new(child_extent, first), already_processed.into())
                                     .chain([child])
                                     .chain(children.map(|(_, child)| child))
                                     .collect(),
@@ -176,9 +169,8 @@ pub trait HexDiv: Clone {
                 Self::new(extent, first)
             }
             Err(first) => Self::from_nodes_unchecked(
-                total_splits,
                 extent,
-                child_extent,
+                splits,
                 once(first)
                     .chain(children.map(|(_, child)| child))
                     .collect(),
@@ -191,9 +183,8 @@ pub trait HexDiv: Clone {
     ///
     /// Constructs a new instance from a [`HexDiv::LeavesBuilder`].
     fn from_leaves_unchecked(
-        total_splits: u8,
         extent: Extent,
-        child_extent: Extent,
+        splits: Splits,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self;
@@ -202,15 +193,25 @@ pub trait HexDiv: Clone {
     ///
     /// Constructs a new instance from a list of nodes.
     fn from_nodes_unchecked(
-        total_splits: u8,
         extent: Extent,
-        child_extent: Extent,
+        splits: Splits,
         nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self;
 
     /// Returns the extent of this node.
     fn extent(&self) -> Extent;
+
+    /// Returns the layout of child nodes in terms of [`Splits`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when called on a leaf node.
+    ///
+    /// One could argue, that [`Splits::NONE`] should be returned in that case, but calling it on a
+    /// leaf might easily happen unintentionally from logic errors and panicking instead can catch
+    /// those bugs early.
+    fn splits(&self) -> Splits;
 
     /// Returns a reference to the underlying data of this node.
     ///
@@ -256,7 +257,10 @@ pub type CacheRef<'a, T> = <<T as HexDiv>::Cache<'a> as Cache<'a, <T as HexDiv>:
 /// A reference to the data of a [`HexDiv`] node.
 #[derive(Educe)]
 #[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub enum NodeDataRef<'a, T: HexDiv + 'a> {
+pub enum NodeDataRef<'a, T: HexDiv>
+where
+    T::Leaf: 'a,
+{
     Leaf(T::LeafRef<'a>),
     Parent(&'a T::Parent, CacheRef<'a, T>),
 }
@@ -276,7 +280,7 @@ impl<'a, T: HexDiv> NodeDataRef<'a, T> {
 /// [`NodeRef::Leaf`] is used (exclusively) for virtual nodes used by leaves nodes.
 #[derive(Educe)]
 #[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub enum NodeRef<'a, T: HexDiv + 'a> {
+pub enum NodeRef<'a, T: HexDiv> {
     Node(&'a T),
     Leaf(T::LeafRef<'a>),
 }
@@ -295,6 +299,10 @@ impl<'a, T: HexDiv> NodeRef<'a, T> {
         } else {
             None
         }
+    }
+
+    pub fn is_parent(self) -> bool {
+        self.as_parent().is_some()
     }
 }
 

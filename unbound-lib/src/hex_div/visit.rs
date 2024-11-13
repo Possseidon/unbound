@@ -4,48 +4,36 @@ use glam::UVec3;
 use super::{bounds::Bounds, extent::Splits, HexDiv, ParentNodeRef};
 use crate::math::bounds::UBounds3;
 
-/// Iterates over all nodes in the octree.
-pub fn all<T>(_: VisitNode<T>) -> Enter {
-    Enter::All
-}
-
 /// Skips over nodes that lie outside of `target`.
 pub fn within<T: HexDiv>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
-    move |node| Enter::within(node.bounds(), node.splits, target)
+    move |node| Enter::within(node.bounds(), node.node().get().splits(), target)
 }
 
 /// Skips over nodes that lie outside or inside `target`.
 pub fn until<T: HexDiv>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
-    move |node| Enter::until(node.bounds(), node.splits, target)
+    move |node| Enter::until(node.bounds(), node.node().get().splits(), target)
 }
 
 #[derive(Educe)]
 #[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct VisitNode<'a, T> {
+    pub(super) bounds: Bounds,
     pub(super) node: ParentNodeRef<'a, T>,
-    pub(super) min: UVec3,
-    pub(super) splits: Splits,
 }
 
 impl<'a, T: HexDiv> VisitNode<'a, T> {
+    /// The bounds of [`Self::node`].
+    pub fn bounds(self) -> Bounds {
+        self.bounds
+    }
+
     /// The node that is being visited.
     pub fn node(self) -> ParentNodeRef<'a, T> {
         self.node
     }
-
-    /// The bounds of [`Self::node`].
-    pub fn bounds(self) -> Bounds {
-        Bounds::new(self.min, self.node.get().extent())
-    }
-
-    /// Describes the layout of [`Self::node`]'s children.
-    ///
-    /// [`OctreeSplits::NONE`] for leaf nodes.
-    pub fn splits(self) -> Splits {
-        self.splits
-    }
 }
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Enter {
     /// Skips the node without yielding any of its children.
     None,
@@ -57,7 +45,7 @@ pub enum Enter {
 
 impl Enter {
     fn within(bounds: Bounds, splits: Splits, target: UBounds3) -> Self {
-        if bounds.to_ubounds3().is_disjoint(target) {
+        if target.upper().cmpeq(UVec3::splat(0)).any() || bounds.to_ubounds3().is_disjoint(target) {
             return Self::None;
         }
 
@@ -70,7 +58,7 @@ impl Enter {
         }
 
         Self::Only {
-            child: child_bounds.small_index_within(bounds.extent()),
+            child: child_bounds.child_index(splits),
         }
     }
 

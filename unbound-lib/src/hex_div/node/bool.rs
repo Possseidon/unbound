@@ -4,25 +4,22 @@ use std::{
 };
 
 use arrayvec::ArrayVec;
+use educe::Educe;
 
 use crate::hex_div::{
+    bounds::Bounds,
     cache::{Cache, CacheIn},
     extent::{Extent, Splits},
+    iter::Iter,
     HexDiv, NodeDataRef, NodeRef,
 };
 
-/// An octree node that stores [`bool`]s as single bits where it makes sense.
-///
-/// Should only be used if `size_of::<P>() <= ptr - 4` and if `P` is cheap to clone, which the size
-/// limit more or less implies, since "expensive to clone" generally also means storing some
-/// pointer.
-///
-/// If `P` is bigger, [`NodeWithLargeParent`] remains the same size no matter how big `P`
-/// is, at the cost of "leaves" nodes containing an extra indirection.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct Node<P = ()>(Repr<P>);
+/// A compact representation for a [`HexDiv`] node storing [`bool`]s.
+#[derive(Educe)]
+#[educe(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct BitNode<P = ()>(Repr<P>);
 
-impl<P: Clone> HexDiv for Node<P> {
+impl<P> HexDiv for BitNode<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -36,29 +33,31 @@ impl<P: Clone> HexDiv for Node<P> {
     }
 
     fn from_leaves_unchecked(
-        _total_splits: u8,
         extent: Extent,
-        _child_extent: Extent,
+        splits: Splits,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
-        Self(Repr::Leaves(extent, parent, leaves.leaves))
+        Self(Repr::Leaves(
+            extent,
+            splits,
+            Arc::new((leaves.leaves, parent)),
+        ))
     }
 
     fn from_nodes_unchecked(
-        total_splits: u8,
         extent: Extent,
-        _child_extent: Extent,
+        splits: Splits,
         nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
-        Self(match total_splits {
-            1 => Repr::from_nodes(Repr::Parent1, extent, nodes, parent),
-            2 => Repr::from_nodes(Repr::Parent2, extent, nodes, parent),
-            3 => Repr::from_nodes(Repr::Parent3, extent, nodes, parent),
-            4 => Repr::from_nodes(Repr::Parent4, extent, nodes, parent),
-            5 => Repr::from_nodes(Repr::Parent5, extent, nodes, parent),
-            6 => Repr::from_nodes(Repr::Parent6, extent, nodes, parent),
+        Self(match splits.total() {
+            1 => Repr::from_nodes(Repr::Parent1, extent, splits, nodes, parent),
+            2 => Repr::from_nodes(Repr::Parent2, extent, splits, nodes, parent),
+            3 => Repr::from_nodes(Repr::Parent3, extent, splits, nodes, parent),
+            4 => Repr::from_nodes(Repr::Parent4, extent, splits, nodes, parent),
+            5 => Repr::from_nodes(Repr::Parent5, extent, splits, nodes, parent),
+            6 => Repr::from_nodes(Repr::Parent6, extent, splits, nodes, parent),
             _ => panic!("invalid number of splits"),
         })
     }
@@ -76,16 +75,29 @@ impl<P: Clone> HexDiv for Node<P> {
         }
     }
 
+    fn splits(&self) -> Splits {
+        match self.0 {
+            Repr::Leaf(..) => panic!("leaf nodes have no splits"),
+            Repr::Leaves(_, splits, _)
+            | Repr::Parent1(_, splits, _)
+            | Repr::Parent2(_, splits, _)
+            | Repr::Parent3(_, splits, _)
+            | Repr::Parent4(_, splits, _)
+            | Repr::Parent5(_, splits, _)
+            | Repr::Parent6(_, splits, _) => splits,
+        }
+    }
+
     fn as_data(&self) -> NodeDataRef<Self> {
         match &self.0 {
             Repr::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
-            Repr::Leaves(_, parent, _)
-            | Repr::Parent1(_, parent, _)
-            | Repr::Parent2(_, parent, _)
-            | Repr::Parent3(_, parent, _)
-            | Repr::Parent4(_, parent, _)
-            | Repr::Parent5(_, parent, _)
-            | Repr::Parent6(_, parent, _) => NodeDataRef::Parent(parent, ()),
+            Repr::Leaves(_, _, node) => NodeDataRef::Parent(&node.1, ()),
+            Repr::Parent1(_, _, node) => NodeDataRef::Parent(&node.parent, ()),
+            Repr::Parent2(_, _, node) => NodeDataRef::Parent(&node.parent, ()),
+            Repr::Parent3(_, _, node) => NodeDataRef::Parent(&node.parent, ()),
+            Repr::Parent4(_, _, node) => NodeDataRef::Parent(&node.parent, ()),
+            Repr::Parent5(_, _, node) => NodeDataRef::Parent(&node.parent, ()),
+            Repr::Parent6(_, _, node) => NodeDataRef::Parent(&node.parent, ()),
         }
     }
 
@@ -100,32 +112,35 @@ impl<P: Clone> HexDiv for Node<P> {
     fn get_child(&self, index: u8) -> NodeRef<Self> {
         let index = usize::from(index);
         match &self.0 {
-            Repr::Leaf(..) => panic!("leaf nodes have no children"),
-            Repr::Leaves(_, _, leaves) => NodeRef::Leaf(1 << index & *leaves != 0),
-            Repr::Parent1(_, _, children) => NodeRef::Node(&children[index]),
-            Repr::Parent2(_, _, children) => NodeRef::Node(&children[index]),
-            Repr::Parent3(_, _, children) => NodeRef::Node(&children[index]),
-            Repr::Parent4(_, _, children) => NodeRef::Node(&children[index]),
-            Repr::Parent5(_, _, children) => NodeRef::Node(&children[index]),
-            Repr::Parent6(_, _, children) => NodeRef::Node(&children[index]),
+            Repr::Leaf(_, _) => panic!("leaf nodes have no children"),
+            Repr::Leaves(_, _, leaves) => NodeRef::Leaf(1 << index & leaves.0 != 0),
+            Repr::Parent1(_, _, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent2(_, _, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent3(_, _, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent4(_, _, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent5(_, _, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent6(_, _, node) => NodeRef::Node(&node.children[index]),
         }
     }
 }
 
-/// An octree node that stores [`bool`]s and keeps track of the total number of set bits.
-///
-/// The count requires an extra [`u128`] per "proper" parent node when compared to [`Node`].
-///
-/// Should only be used if `size_of::<P>() <= ptr - 4` and if `P` is cheap to clone, which the size
-/// limit more or less implies, since "expensive to clone" generally also means storing some
-/// pointer.
-///
-/// If `P` is bigger, [`NodeWithLargeParentAndCount`] remains the same size no matter how big `P`
-/// is, at the cost of "leaves" nodes containing an extra indirection.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct NodeWithCount<P = ()>(ReprWithCount<P>);
+impl<'a, P> IntoIterator for &'a BitNode<P> {
+    type Item = (Bounds, NodeRef<'a, BitNode<P>>);
+    type IntoIter = Iter<'a, BitNode<P>>;
 
-impl<P: Clone> HexDiv for NodeWithCount<P> {
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// A [`BitNode`] with [cached](`HexDiv::Cache`) total number of `true` leaves.
+///
+/// Requires an extra [`u128`] per "proper" parent node when compared to [`BitNode`].
+#[derive(Educe)]
+#[educe(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct BitNodeWithCount<P = ()>(ReprWithCount<P>);
+
+impl<P> HexDiv for BitNodeWithCount<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -139,30 +154,31 @@ impl<P: Clone> HexDiv for NodeWithCount<P> {
     }
 
     fn from_leaves_unchecked(
-        _total_splits: u8,
         extent: Extent,
-        _child_extent: Extent,
+        splits: Splits,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
-        Self(ReprWithCount::Leaves(extent, parent, leaves.leaves))
+        Self(ReprWithCount::Leaves(
+            extent,
+            splits,
+            Arc::new((leaves.leaves, parent)),
+        ))
     }
 
     fn from_nodes_unchecked(
-        total_splits: u8,
         extent: Extent,
-        child_extent: Extent,
+        splits: Splits,
         nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
-        use ReprWithCount as Repr;
-        Self(match total_splits {
-            1 => Repr::from_nodes(Repr::Parent1, extent, child_extent, nodes, parent),
-            2 => Repr::from_nodes(Repr::Parent2, extent, child_extent, nodes, parent),
-            3 => Repr::from_nodes(Repr::Parent3, extent, child_extent, nodes, parent),
-            4 => Repr::from_nodes(Repr::Parent4, extent, child_extent, nodes, parent),
-            5 => Repr::from_nodes(Repr::Parent5, extent, child_extent, nodes, parent),
-            6 => Repr::from_nodes(Repr::Parent6, extent, child_extent, nodes, parent),
+        Self(match splits.total() {
+            1 => ReprWithCount::from_nodes(ReprWithCount::Parent1, extent, splits, nodes, parent),
+            2 => ReprWithCount::from_nodes(ReprWithCount::Parent2, extent, splits, nodes, parent),
+            3 => ReprWithCount::from_nodes(ReprWithCount::Parent3, extent, splits, nodes, parent),
+            4 => ReprWithCount::from_nodes(ReprWithCount::Parent4, extent, splits, nodes, parent),
+            5 => ReprWithCount::from_nodes(ReprWithCount::Parent5, extent, splits, nodes, parent),
+            6 => ReprWithCount::from_nodes(ReprWithCount::Parent6, extent, splits, nodes, parent),
             _ => panic!("invalid number of splits"),
         })
     }
@@ -180,18 +196,32 @@ impl<P: Clone> HexDiv for NodeWithCount<P> {
         }
     }
 
+    fn splits(&self) -> Splits {
+        match self.0 {
+            ReprWithCount::Leaf(..) => panic!("leaf nodes have no splits"),
+            ReprWithCount::Leaves(_, splits, _)
+            | ReprWithCount::Parent1(_, splits, _)
+            | ReprWithCount::Parent2(_, splits, _)
+            | ReprWithCount::Parent3(_, splits, _)
+            | ReprWithCount::Parent4(_, splits, _)
+            | ReprWithCount::Parent5(_, splits, _)
+            | ReprWithCount::Parent6(_, splits, _) => splits,
+        }
+    }
+
     fn as_data(&self) -> NodeDataRef<Self> {
         match &self.0 {
-            ReprWithCount::Leaf(_, leaf) => return NodeDataRef::Leaf(*leaf),
-            ReprWithCount::Leaves(_, parent, leaves) => {
-                NodeDataRef::Parent(parent, Count(leaves.count_ones().into()))
+            ReprWithCount::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
+            ReprWithCount::Leaves(_, _, leaves) => {
+                let (bits, parent) = &**leaves;
+                NodeDataRef::Parent(parent, Count(bits.count_ones().into()))
             }
-            ReprWithCount::Parent1(_, parent, node) => NodeDataRef::Parent(parent, node.count),
-            ReprWithCount::Parent2(_, parent, node) => NodeDataRef::Parent(parent, node.count),
-            ReprWithCount::Parent3(_, parent, node) => NodeDataRef::Parent(parent, node.count),
-            ReprWithCount::Parent4(_, parent, node) => NodeDataRef::Parent(parent, node.count),
-            ReprWithCount::Parent5(_, parent, node) => NodeDataRef::Parent(parent, node.count),
-            ReprWithCount::Parent6(_, parent, node) => NodeDataRef::Parent(parent, node.count),
+            ReprWithCount::Parent1(_, _, node) => NodeDataRef::Parent(&node.parent, node.count),
+            ReprWithCount::Parent2(_, _, node) => NodeDataRef::Parent(&node.parent, node.count),
+            ReprWithCount::Parent3(_, _, node) => NodeDataRef::Parent(&node.parent, node.count),
+            ReprWithCount::Parent4(_, _, node) => NodeDataRef::Parent(&node.parent, node.count),
+            ReprWithCount::Parent5(_, _, node) => NodeDataRef::Parent(&node.parent, node.count),
+            ReprWithCount::Parent6(_, _, node) => NodeDataRef::Parent(&node.parent, node.count),
         }
     }
 
@@ -207,7 +237,7 @@ impl<P: Clone> HexDiv for NodeWithCount<P> {
         let index = usize::from(index);
         match &self.0 {
             ReprWithCount::Leaf(_, _) => panic!("leaf nodes have no children"),
-            ReprWithCount::Leaves(_, _, leaves) => NodeRef::Leaf(1 << index & *leaves != 0),
+            ReprWithCount::Leaves(_, _, leaves) => NodeRef::Leaf(1 << index & leaves.0 != 0),
             ReprWithCount::Parent1(_, _, node) => NodeRef::Node(&node.children[index]),
             ReprWithCount::Parent2(_, _, node) => NodeRef::Node(&node.children[index]),
             ReprWithCount::Parent3(_, _, node) => NodeRef::Node(&node.children[index]),
@@ -218,13 +248,26 @@ impl<P: Clone> HexDiv for NodeWithCount<P> {
     }
 }
 
-/// A [`Node`] that can store large `P` without bloating the size of the node itself.
-///
-/// This has the cost of introducing an extra indirection for [`NodeWithLargeParent::Leaves`].
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct NodeWithLargeParent<P>(ReprWithLargeParent<P>);
+impl<'a, P> IntoIterator for &'a BitNodeWithCount<P> {
+    type Item = (Bounds, NodeRef<'a, BitNodeWithCount<P>>);
+    type IntoIter = Iter<'a, BitNodeWithCount<P>>;
 
-impl<P: Clone> HexDiv for NodeWithLargeParent<P> {
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// A [`BitNode`] that stores its [`HexDiv::Parent`] inline instead of in the [`Arc`].
+///
+/// This type should only be used if `P` fits in a single byte. Common use-cases for this are
+/// storing some small number, some `enum` variant or a small bitfield.
+///
+/// However, prefer [`BitNode`] if [`HexDiv::Parent`] is a ZST such as [`BitNode`]'s default of
+/// `()`.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct BitNodeWithInlineParent<P>(ReprWithInlineParent<P>);
+
+impl<P> HexDiv for BitNodeWithInlineParent<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -234,69 +277,82 @@ impl<P: Clone> HexDiv for NodeWithLargeParent<P> {
     type Cache<'a> = NoCache;
 
     fn new(extent: Extent, leaf: Self::Leaf) -> Self {
-        Self(ReprWithLargeParent::Leaf(extent, leaf))
+        Self(ReprWithInlineParent::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
-        _total_splits: u8,
         extent: Extent,
-        _child_extent: Extent,
+        splits: Splits,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
-        Self(ReprWithLargeParent::Leaves(
+        Self(ReprWithInlineParent::Leaves(
             extent,
-            Arc::new((leaves.leaves, parent)),
+            splits,
+            parent,
+            leaves.leaves,
         ))
     }
 
     fn from_nodes_unchecked(
-        total_splits: u8,
         extent: Extent,
-        _child_extent: Extent,
+        splits: Splits,
         nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
-        use ReprWithLargeParent as Repr;
-        Self(match total_splits {
-            1 => Repr::from_nodes(Repr::Parent1, extent, nodes, parent),
-            2 => Repr::from_nodes(Repr::Parent2, extent, nodes, parent),
-            3 => Repr::from_nodes(Repr::Parent3, extent, nodes, parent),
-            4 => Repr::from_nodes(Repr::Parent4, extent, nodes, parent),
-            5 => Repr::from_nodes(Repr::Parent5, extent, nodes, parent),
-            6 => Repr::from_nodes(Repr::Parent6, extent, nodes, parent),
+        use ReprWithInlineParent as Repr;
+        Self(match splits.total() {
+            1 => Repr::from_nodes(Repr::Parent1, extent, splits, nodes, parent),
+            2 => Repr::from_nodes(Repr::Parent2, extent, splits, nodes, parent),
+            3 => Repr::from_nodes(Repr::Parent3, extent, splits, nodes, parent),
+            4 => Repr::from_nodes(Repr::Parent4, extent, splits, nodes, parent),
+            5 => Repr::from_nodes(Repr::Parent5, extent, splits, nodes, parent),
+            6 => Repr::from_nodes(Repr::Parent6, extent, splits, nodes, parent),
             _ => panic!("invalid number of splits"),
         })
     }
 
     fn extent(&self) -> Extent {
         match self.0 {
-            ReprWithLargeParent::Leaf(extent, _)
-            | ReprWithLargeParent::Leaves(extent, _)
-            | ReprWithLargeParent::Parent1(extent, _)
-            | ReprWithLargeParent::Parent2(extent, _)
-            | ReprWithLargeParent::Parent3(extent, _)
-            | ReprWithLargeParent::Parent4(extent, _)
-            | ReprWithLargeParent::Parent5(extent, _)
-            | ReprWithLargeParent::Parent6(extent, _) => extent,
+            ReprWithInlineParent::Leaf(extent, _)
+            | ReprWithInlineParent::Leaves(extent, _, _, _)
+            | ReprWithInlineParent::Parent1(extent, _, _, _)
+            | ReprWithInlineParent::Parent2(extent, _, _, _)
+            | ReprWithInlineParent::Parent3(extent, _, _, _)
+            | ReprWithInlineParent::Parent4(extent, _, _, _)
+            | ReprWithInlineParent::Parent5(extent, _, _, _)
+            | ReprWithInlineParent::Parent6(extent, _, _, _) => extent,
+        }
+    }
+
+    fn splits(&self) -> Splits {
+        match self.0 {
+            ReprWithInlineParent::Leaf(..) => panic!("leaf nodes have no splits"),
+            ReprWithInlineParent::Leaves(_, splits, _, _)
+            | ReprWithInlineParent::Parent1(_, splits, _, _)
+            | ReprWithInlineParent::Parent2(_, splits, _, _)
+            | ReprWithInlineParent::Parent3(_, splits, _, _)
+            | ReprWithInlineParent::Parent4(_, splits, _, _)
+            | ReprWithInlineParent::Parent5(_, splits, _, _)
+            | ReprWithInlineParent::Parent6(_, splits, _, _) => splits,
         }
     }
 
     fn as_data(&self) -> NodeDataRef<Self> {
         match &self.0 {
-            ReprWithLargeParent::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
-            ReprWithLargeParent::Leaves(_, node) => NodeDataRef::Parent(&node.1, ()),
-            ReprWithLargeParent::Parent1(_, node) => NodeDataRef::Parent(&node.parent, ()),
-            ReprWithLargeParent::Parent2(_, node) => NodeDataRef::Parent(&node.parent, ()),
-            ReprWithLargeParent::Parent3(_, node) => NodeDataRef::Parent(&node.parent, ()),
-            ReprWithLargeParent::Parent4(_, node) => NodeDataRef::Parent(&node.parent, ()),
-            ReprWithLargeParent::Parent5(_, node) => NodeDataRef::Parent(&node.parent, ()),
-            ReprWithLargeParent::Parent6(_, node) => NodeDataRef::Parent(&node.parent, ()),
+            ReprWithInlineParent::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
+            ReprWithInlineParent::Leaves(_, _, parent, _)
+            | ReprWithInlineParent::Parent1(_, _, parent, _)
+            | ReprWithInlineParent::Parent2(_, _, parent, _)
+            | ReprWithInlineParent::Parent3(_, _, parent, _)
+            | ReprWithInlineParent::Parent4(_, _, parent, _)
+            | ReprWithInlineParent::Parent5(_, _, parent, _)
+            | ReprWithInlineParent::Parent6(_, _, parent, _) => NodeDataRef::Parent(parent, ()),
         }
     }
 
     fn into_leaf(self) -> Result<Self::Leaf, Self> {
-        if let ReprWithLargeParent::Leaf(_, leaf) = self.0 {
+        if let ReprWithInlineParent::Leaf(_, leaf) = self.0 {
             Ok(leaf)
         } else {
             Err(self)
@@ -306,23 +362,36 @@ impl<P: Clone> HexDiv for NodeWithLargeParent<P> {
     fn get_child(&self, index: u8) -> NodeRef<Self> {
         let index = usize::from(index);
         match &self.0 {
-            ReprWithLargeParent::Leaf(_, _) => panic!("leaf nodes have no children"),
-            ReprWithLargeParent::Leaves(_, leaves) => NodeRef::Leaf(1 << index & leaves.0 != 0),
-            ReprWithLargeParent::Parent1(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParent::Parent2(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParent::Parent3(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParent::Parent4(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParent::Parent5(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParent::Parent6(_, node) => NodeRef::Node(&node.children[index]),
+            ReprWithInlineParent::Leaf(..) => panic!("leaf nodes have no children"),
+            ReprWithInlineParent::Leaves(_, _, _, leaves) => {
+                NodeRef::Leaf(1 << index & *leaves != 0)
+            }
+            ReprWithInlineParent::Parent1(_, _, _, children) => NodeRef::Node(&children[index]),
+            ReprWithInlineParent::Parent2(_, _, _, children) => NodeRef::Node(&children[index]),
+            ReprWithInlineParent::Parent3(_, _, _, children) => NodeRef::Node(&children[index]),
+            ReprWithInlineParent::Parent4(_, _, _, children) => NodeRef::Node(&children[index]),
+            ReprWithInlineParent::Parent5(_, _, _, children) => NodeRef::Node(&children[index]),
+            ReprWithInlineParent::Parent6(_, _, _, children) => NodeRef::Node(&children[index]),
         }
     }
 }
 
-/// A combination of [`NodeWithLargeParent`] and [`NodeWithCount`].
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct NodeWithLargeParentAndCount<P>(ReprWithLargeParentAndCount<P>);
+impl<'a, P> IntoIterator for &'a BitNodeWithInlineParent<P> {
+    type Item = (Bounds, NodeRef<'a, BitNodeWithInlineParent<P>>);
+    type IntoIter = Iter<'a, BitNodeWithInlineParent<P>>;
 
-impl<P: Clone> HexDiv for NodeWithLargeParentAndCount<P> {
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// A combination of [`BitNodeWithCount`] and [`BitNodeWithInlineParent`].
+///
+/// See both types for their respective caveats.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct BitNodeWithInlineParentAndCount<P>(ReprWithBoth<P>);
+
+impl<P> HexDiv for BitNodeWithInlineParentAndCount<P> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
@@ -332,73 +401,78 @@ impl<P: Clone> HexDiv for NodeWithLargeParentAndCount<P> {
     type Cache<'a> = Count;
 
     fn new(extent: Extent, leaf: Self::Leaf) -> Self {
-        Self(ReprWithLargeParentAndCount::Leaf(extent, leaf))
+        Self(ReprWithBoth::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
-        _total_splits: u8,
         extent: Extent,
-        _child_extent: Extent,
+        splits: Splits,
         leaves: Self::LeavesBuilder,
         parent: Self::Parent,
     ) -> Self {
-        Self(ReprWithLargeParentAndCount::Leaves(
-            extent,
-            Arc::new((leaves.leaves, parent)),
-        ))
+        Self(ReprWithBoth::Leaves(extent, splits, parent, leaves.leaves))
     }
 
     fn from_nodes_unchecked(
-        total_splits: u8,
         extent: Extent,
-        child_extent: Extent,
+        splits: Splits,
         nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         parent: Self::Parent,
     ) -> Self {
-        use ReprWithLargeParentAndCount as Repr;
-        Self(match total_splits {
-            1 => Repr::from_nodes(Repr::Parent1, extent, child_extent, nodes, parent),
-            2 => Repr::from_nodes(Repr::Parent2, extent, child_extent, nodes, parent),
-            3 => Repr::from_nodes(Repr::Parent3, extent, child_extent, nodes, parent),
-            4 => Repr::from_nodes(Repr::Parent4, extent, child_extent, nodes, parent),
-            5 => Repr::from_nodes(Repr::Parent5, extent, child_extent, nodes, parent),
-            6 => Repr::from_nodes(Repr::Parent6, extent, child_extent, nodes, parent),
+        Self(match splits.total() {
+            1 => ReprWithBoth::from_nodes(ReprWithBoth::Parent1, extent, splits, nodes, parent),
+            2 => ReprWithBoth::from_nodes(ReprWithBoth::Parent2, extent, splits, nodes, parent),
+            3 => ReprWithBoth::from_nodes(ReprWithBoth::Parent3, extent, splits, nodes, parent),
+            4 => ReprWithBoth::from_nodes(ReprWithBoth::Parent4, extent, splits, nodes, parent),
+            5 => ReprWithBoth::from_nodes(ReprWithBoth::Parent5, extent, splits, nodes, parent),
+            6 => ReprWithBoth::from_nodes(ReprWithBoth::Parent6, extent, splits, nodes, parent),
             _ => panic!("invalid number of splits"),
         })
     }
 
     fn extent(&self) -> Extent {
         match self.0 {
-            ReprWithLargeParentAndCount::Leaf(extent, _)
-            | ReprWithLargeParentAndCount::Leaves(extent, _)
-            | ReprWithLargeParentAndCount::Parent1(extent, _)
-            | ReprWithLargeParentAndCount::Parent2(extent, _)
-            | ReprWithLargeParentAndCount::Parent3(extent, _)
-            | ReprWithLargeParentAndCount::Parent4(extent, _)
-            | ReprWithLargeParentAndCount::Parent5(extent, _)
-            | ReprWithLargeParentAndCount::Parent6(extent, _) => extent,
+            ReprWithBoth::Leaf(extent, _)
+            | ReprWithBoth::Leaves(extent, _, _, _)
+            | ReprWithBoth::Parent1(extent, _, _, _)
+            | ReprWithBoth::Parent2(extent, _, _, _)
+            | ReprWithBoth::Parent3(extent, _, _, _)
+            | ReprWithBoth::Parent4(extent, _, _, _)
+            | ReprWithBoth::Parent5(extent, _, _, _)
+            | ReprWithBoth::Parent6(extent, _, _, _) => extent,
+        }
+    }
+
+    fn splits(&self) -> Splits {
+        match self.0 {
+            ReprWithBoth::Leaf(..) => panic!("leaf nodes have no splits"),
+            ReprWithBoth::Leaves(_, splits, _, _)
+            | ReprWithBoth::Parent1(_, splits, _, _)
+            | ReprWithBoth::Parent2(_, splits, _, _)
+            | ReprWithBoth::Parent3(_, splits, _, _)
+            | ReprWithBoth::Parent4(_, splits, _, _)
+            | ReprWithBoth::Parent5(_, splits, _, _)
+            | ReprWithBoth::Parent6(_, splits, _, _) => splits,
         }
     }
 
     fn as_data(&self) -> NodeDataRef<Self> {
-        use ReprWithLargeParentAndCount as Repr; // shortened to avoid wrapping in match arms
         match &self.0 {
-            Repr::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
-            Repr::Leaves(_, leaves) => {
-                let (bits, parent) = &**leaves;
-                NodeDataRef::Parent(parent, Count(bits.count_ones().into()))
+            ReprWithBoth::Leaf(_, leaf) => return NodeDataRef::Leaf(*leaf),
+            ReprWithBoth::Leaves(_, _, parent, leaves) => {
+                NodeDataRef::Parent(parent, Count(leaves.count_ones().into()))
             }
-            Repr::Parent1(_, node) => NodeDataRef::Parent(&node.parent, node.count),
-            Repr::Parent2(_, node) => NodeDataRef::Parent(&node.parent, node.count),
-            Repr::Parent3(_, node) => NodeDataRef::Parent(&node.parent, node.count),
-            Repr::Parent4(_, node) => NodeDataRef::Parent(&node.parent, node.count),
-            Repr::Parent5(_, node) => NodeDataRef::Parent(&node.parent, node.count),
-            Repr::Parent6(_, node) => NodeDataRef::Parent(&node.parent, node.count),
+            ReprWithBoth::Parent1(_, _, parent, node) => NodeDataRef::Parent(parent, node.count),
+            ReprWithBoth::Parent2(_, _, parent, node) => NodeDataRef::Parent(parent, node.count),
+            ReprWithBoth::Parent3(_, _, parent, node) => NodeDataRef::Parent(parent, node.count),
+            ReprWithBoth::Parent4(_, _, parent, node) => NodeDataRef::Parent(parent, node.count),
+            ReprWithBoth::Parent5(_, _, parent, node) => NodeDataRef::Parent(parent, node.count),
+            ReprWithBoth::Parent6(_, _, parent, node) => NodeDataRef::Parent(parent, node.count),
         }
     }
 
     fn into_leaf(self) -> Result<Self::Leaf, Self> {
-        if let ReprWithLargeParentAndCount::Leaf(_, leaf) = self.0 {
+        if let ReprWithBoth::Leaf(_, leaf) = self.0 {
             Ok(leaf)
         } else {
             Err(self)
@@ -408,28 +482,204 @@ impl<P: Clone> HexDiv for NodeWithLargeParentAndCount<P> {
     fn get_child(&self, index: u8) -> NodeRef<Self> {
         let index = usize::from(index);
         match &self.0 {
-            ReprWithLargeParentAndCount::Leaf(_, _) => panic!("leaf nodes have no children"),
-            ReprWithLargeParentAndCount::Leaves(_, leaves) => {
-                NodeRef::Leaf(1 << index & leaves.0 != 0)
-            }
-            ReprWithLargeParentAndCount::Parent1(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParentAndCount::Parent2(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParentAndCount::Parent3(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParentAndCount::Parent4(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParentAndCount::Parent5(_, node) => NodeRef::Node(&node.children[index]),
-            ReprWithLargeParentAndCount::Parent6(_, node) => NodeRef::Node(&node.children[index]),
+            ReprWithBoth::Leaf(_, _) => panic!("leaf nodes have no children"),
+            ReprWithBoth::Leaves(_, _, _, leaves) => NodeRef::Leaf(1 << index & *leaves != 0),
+            ReprWithBoth::Parent1(_, _, _, node) => NodeRef::Node(&node.children[index]),
+            ReprWithBoth::Parent2(_, _, _, node) => NodeRef::Node(&node.children[index]),
+            ReprWithBoth::Parent3(_, _, _, node) => NodeRef::Node(&node.children[index]),
+            ReprWithBoth::Parent4(_, _, _, node) => NodeRef::Node(&node.children[index]),
+            ReprWithBoth::Parent5(_, _, _, node) => NodeRef::Node(&node.children[index]),
+            ReprWithBoth::Parent6(_, _, _, node) => NodeRef::Node(&node.children[index]),
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NoCache;
+#[derive(Educe)]
+#[educe(Clone, Debug, Hash, PartialEq, Eq)]
+enum Repr<P> {
+    Leaf(Extent, bool),
+    Leaves(Extent, Splits, Arc<(u64, P)>),
+    Parent1(Extent, Splits, Arc<ParentNode<2, P>>),
+    Parent2(Extent, Splits, Arc<ParentNode<4, P>>),
+    Parent3(Extent, Splits, Arc<ParentNode<8, P>>),
+    Parent4(Extent, Splits, Arc<ParentNode<16, P>>),
+    Parent5(Extent, Splits, Arc<ParentNode<32, P>>),
+    Parent6(Extent, Splits, Arc<ParentNode<64, P>>),
+}
 
-impl<'a, T> Cache<'a, T> for NoCache {
-    type Ref = ();
+type NewReprParent<P, const N: usize> = fn(Extent, Splits, Arc<ParentNode<N, P>>) -> Repr<P>;
 
-    fn compute_cache(_: Extent, _: impl IntoIterator<Item = CacheIn<'a, T, Self>>) -> Self {
-        Self
+impl<P> Repr<P> {
+    fn from_nodes<const N: usize>(
+        new: NewReprParent<P, N>,
+        extent: Extent,
+        splits: Splits,
+        nodes: ArrayVec<BitNode<P>, { Splits::MAX_VOLUME_USIZE }>,
+        parent: P,
+    ) -> Self {
+        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
+        new(extent, splits, Arc::new(ParentNode { children, parent }))
+    }
+}
+
+#[derive(Educe)]
+#[educe(Clone, Debug, Hash, PartialEq, Eq)]
+enum ReprWithCount<P> {
+    Leaf(Extent, bool),
+    Leaves(Extent, Splits, Arc<(u64, P)>),
+    Parent1(Extent, Splits, Arc<ParentNodeWithCount<2, P>>),
+    Parent2(Extent, Splits, Arc<ParentNodeWithCount<4, P>>),
+    Parent3(Extent, Splits, Arc<ParentNodeWithCount<8, P>>),
+    Parent4(Extent, Splits, Arc<ParentNodeWithCount<16, P>>),
+    Parent5(Extent, Splits, Arc<ParentNodeWithCount<32, P>>),
+    Parent6(Extent, Splits, Arc<ParentNodeWithCount<64, P>>),
+}
+
+type NewReprWithCountParent<P, const N: usize> =
+    fn(Extent, Splits, Arc<ParentNodeWithCount<N, P>>) -> ReprWithCount<P>;
+
+impl<P> ReprWithCount<P> {
+    fn from_nodes<const N: usize>(
+        new: NewReprWithCountParent<P, N>,
+        extent: Extent,
+        splits: Splits,
+        nodes: ArrayVec<BitNodeWithCount<P>, { Splits::MAX_VOLUME_USIZE }>,
+        parent: P,
+    ) -> Self {
+        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
+        new(
+            extent,
+            splits,
+            Arc::new(ParentNodeWithCount {
+                count: Count::compute_cache(
+                    extent.split(splits),
+                    children.iter().map(CacheIn::from_node),
+                ),
+                children,
+                parent,
+            }),
+        )
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum ReprWithInlineParent<P> {
+    Leaf(Extent, bool),
+    Leaves(Extent, Splits, P, u64),
+    Parent1(Extent, Splits, P, Arc<[BitNodeWithInlineParent<P>; 2]>),
+    Parent2(Extent, Splits, P, Arc<[BitNodeWithInlineParent<P>; 4]>),
+    Parent3(Extent, Splits, P, Arc<[BitNodeWithInlineParent<P>; 8]>),
+    Parent4(Extent, Splits, P, Arc<[BitNodeWithInlineParent<P>; 16]>),
+    Parent5(Extent, Splits, P, Arc<[BitNodeWithInlineParent<P>; 32]>),
+    Parent6(Extent, Splits, P, Arc<[BitNodeWithInlineParent<P>; 64]>),
+}
+
+type NewReprWithInlineParentParent<P, const N: usize> =
+    fn(Extent, Splits, P, Arc<[BitNodeWithInlineParent<P>; N]>) -> ReprWithInlineParent<P>;
+
+impl<P> ReprWithInlineParent<P> {
+    fn from_nodes<const N: usize>(
+        new: NewReprWithInlineParentParent<P, N>,
+        extent: Extent,
+        splits: Splits,
+        nodes: ArrayVec<BitNodeWithInlineParent<P>, { Splits::MAX_VOLUME_USIZE }>,
+        parent: P,
+    ) -> Self {
+        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
+        new(extent, splits, parent, Arc::new(children))
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum ReprWithBoth<P> {
+    Leaf(Extent, bool),
+    Leaves(Extent, Splits, P, u64),
+    Parent1(Extent, Splits, P, Arc<ParentNodeWithBoth<2, P>>),
+    Parent2(Extent, Splits, P, Arc<ParentNodeWithBoth<4, P>>),
+    Parent3(Extent, Splits, P, Arc<ParentNodeWithBoth<8, P>>),
+    Parent4(Extent, Splits, P, Arc<ParentNodeWithBoth<16, P>>),
+    Parent5(Extent, Splits, P, Arc<ParentNodeWithBoth<32, P>>),
+    Parent6(Extent, Splits, P, Arc<ParentNodeWithBoth<64, P>>),
+}
+
+type NewReprWithBothParent<P, const N: usize> =
+    fn(Extent, Splits, P, Arc<ParentNodeWithBoth<N, P>>) -> ReprWithBoth<P>;
+
+impl<P> ReprWithBoth<P> {
+    fn from_nodes<const N: usize>(
+        new: NewReprWithBothParent<P, N>,
+        extent: Extent,
+        splits: Splits,
+        nodes: ArrayVec<BitNodeWithInlineParentAndCount<P>, { Splits::MAX_VOLUME_USIZE }>,
+        parent: P,
+    ) -> Self {
+        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
+        new(
+            extent,
+            splits,
+            parent,
+            Arc::new(ParentNodeWithBoth {
+                count: Count::compute_cache(
+                    extent.split(splits),
+                    children.iter().map(CacheIn::from_node),
+                ),
+                children,
+            }),
+        )
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct ParentNode<const N: usize, P> {
+    children: [BitNode<P>; N],
+    parent: P,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParentNodeWithCount<const N: usize, P> {
+    /// The total number of set bits across all children.
+    ///
+    /// Can neither be `0` nor the maximum value (depending on the current size), since those would
+    /// be stored as [`NodeWithCount::Leaf`].
+    ///
+    /// Skipped by [`Hash`], since the same `children` always lead to the same `count`.
+    ///
+    /// On the other hand, it makes a lot of sense for [`Eq`] to make use of it, since it has the
+    /// potential to very quickly short-circuit the comparison of large octrees.
+    count: Count,
+    /// The child nodes.
+    children: [BitNodeWithCount<P>; N],
+    parent: P,
+}
+
+impl<const N: usize, P: Hash> Hash for ParentNodeWithCount<N, P> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // count intentionally skipped
+        self.children.hash(state);
+        self.parent.hash(state);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParentNodeWithBoth<const N: usize, P> {
+    /// The total number of set bits across all children.
+    ///
+    /// Can neither be `0` nor the maximum value (depending on the current size), since those would
+    /// be stored as [`NodeWithCount::Leaf`].
+    ///
+    /// Skipped by [`Hash`], since the same `children` always lead to the same `count`.
+    ///
+    /// On the other hand, it makes a lot of sense for [`Eq`] to make use of it, since it has the
+    /// potential to very quickly short-circuit the comparison of large octrees.
+    count: Count,
+    /// The child nodes.
+    children: [BitNodeWithInlineParentAndCount<P>; N],
+}
+
+impl<const N: usize, P: Hash> Hash for ParentNodeWithBoth<N, P> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // count intentionally skipped
+        self.children.hash(state);
     }
 }
 
@@ -481,6 +731,17 @@ impl FromIterator<bool> for LeavesBuilder {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NoCache;
+
+impl<'a, T> Cache<'a, T> for NoCache {
+    type Ref = ();
+
+    fn compute_cache(_: Extent, _: impl IntoIterator<Item = CacheIn<'a, T, Self>>) -> Self {
+        Self
+    }
+}
+
 /// The cached number of `true` in an [`OctreeNode`].
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Count(pub u128);
@@ -502,168 +763,5 @@ impl<'a> Cache<'a, bool> for Count {
                 })
                 .sum(),
         )
-    }
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-enum Repr<P> {
-    Leaf(Extent, bool),
-    Leaves(Extent, P, u64),
-    Parent1(Extent, P, Arc<[Node<P>; 2]>),
-    Parent2(Extent, P, Arc<[Node<P>; 4]>),
-    Parent3(Extent, P, Arc<[Node<P>; 8]>),
-    Parent4(Extent, P, Arc<[Node<P>; 16]>),
-    Parent5(Extent, P, Arc<[Node<P>; 32]>),
-    Parent6(Extent, P, Arc<[Node<P>; 64]>),
-}
-
-impl<P> Repr<P> {
-    fn from_nodes<const N: usize>(
-        new: fn(Extent, P, Arc<[Node<P>; N]>) -> Self,
-        extent: Extent,
-        nodes: ArrayVec<Node<P>, { Splits::MAX_VOLUME_USIZE }>,
-        parent: P,
-    ) -> Self {
-        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
-        new(extent, parent, Arc::new(children))
-    }
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-enum ReprWithCount<P> {
-    Leaf(Extent, bool),
-    Leaves(Extent, P, u64),
-    Parent1(Extent, P, Arc<ParentNodeWithCount<2, P>>),
-    Parent2(Extent, P, Arc<ParentNodeWithCount<4, P>>),
-    Parent3(Extent, P, Arc<ParentNodeWithCount<8, P>>),
-    Parent4(Extent, P, Arc<ParentNodeWithCount<16, P>>),
-    Parent5(Extent, P, Arc<ParentNodeWithCount<32, P>>),
-    Parent6(Extent, P, Arc<ParentNodeWithCount<64, P>>),
-}
-
-impl<P: Clone> ReprWithCount<P> {
-    fn from_nodes<const N: usize>(
-        new: fn(Extent, P, Arc<ParentNodeWithCount<N, P>>) -> Self,
-        extent: Extent,
-        child_extent: Extent,
-        nodes: ArrayVec<NodeWithCount<P>, { Splits::MAX_VOLUME_USIZE }>,
-        parent: P,
-    ) -> Self {
-        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
-        let count = Count::compute_cache(child_extent, children.iter().map(CacheIn::from_node));
-        new(
-            extent,
-            parent,
-            Arc::new(ParentNodeWithCount { count, children }),
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ParentNodeWithCount<const N: usize, P> {
-    /// The total number of set bits across all children.
-    ///
-    /// Can neither be `0` nor the maximum value (depending on the current size), since those would
-    /// be stored as [`NodeWithCount::Leaf`].
-    ///
-    /// Skipped by [`Hash`], since the same `children` always lead to the same `count`.
-    ///
-    /// On the other hand, it makes a lot of sense for [`Eq`] to make use of it, since it has the
-    /// potential to very quickly short-circuit the comparison of large octrees.
-    count: Count,
-    /// The child nodes.
-    children: [NodeWithCount<P>; N],
-}
-
-impl<const N: usize, P: Hash> Hash for ParentNodeWithCount<N, P> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.children.hash(state);
-    }
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-enum ReprWithLargeParent<P> {
-    Leaf(Extent, bool),
-    Leaves(Extent, Arc<(u64, P)>),
-    Parent1(Extent, Arc<LargeParentNode<2, P>>),
-    Parent2(Extent, Arc<LargeParentNode<4, P>>),
-    Parent3(Extent, Arc<LargeParentNode<8, P>>),
-    Parent4(Extent, Arc<LargeParentNode<16, P>>),
-    Parent5(Extent, Arc<LargeParentNode<32, P>>),
-    Parent6(Extent, Arc<LargeParentNode<64, P>>),
-}
-
-impl<P> ReprWithLargeParent<P> {
-    fn from_nodes<const N: usize>(
-        new: fn(Extent, Arc<LargeParentNode<N, P>>) -> Self,
-        extent: Extent,
-        nodes: ArrayVec<NodeWithLargeParent<P>, { Splits::MAX_VOLUME_USIZE }>,
-        parent: P,
-    ) -> Self {
-        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
-        new(extent, Arc::new(LargeParentNode { children, parent }))
-    }
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-struct LargeParentNode<const N: usize, P> {
-    children: [NodeWithLargeParent<P>; N],
-    parent: P,
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-enum ReprWithLargeParentAndCount<P> {
-    Leaf(Extent, bool),
-    Leaves(Extent, Arc<(u64, P)>),
-    Parent1(Extent, Arc<LargeParentNodeWithCount<2, P>>),
-    Parent2(Extent, Arc<LargeParentNodeWithCount<4, P>>),
-    Parent3(Extent, Arc<LargeParentNodeWithCount<8, P>>),
-    Parent4(Extent, Arc<LargeParentNodeWithCount<16, P>>),
-    Parent5(Extent, Arc<LargeParentNodeWithCount<32, P>>),
-    Parent6(Extent, Arc<LargeParentNodeWithCount<64, P>>),
-}
-
-impl<P: Clone> ReprWithLargeParentAndCount<P> {
-    fn from_nodes<const N: usize>(
-        new: fn(Extent, Arc<LargeParentNodeWithCount<N, P>>) -> Self,
-        extent: Extent,
-        child_extent: Extent,
-        nodes: ArrayVec<NodeWithLargeParentAndCount<P>, { Splits::MAX_VOLUME_USIZE }>,
-        parent: P,
-    ) -> Self {
-        let children = array_init::from_iter(nodes).expect("leaves should have correct length");
-        let count = Count::compute_cache(child_extent, children.iter().map(CacheIn::from_node));
-        new(
-            extent,
-            Arc::new(LargeParentNodeWithCount {
-                count,
-                children,
-                parent,
-            }),
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct LargeParentNodeWithCount<const N: usize, P> {
-    /// The total number of set bits across all children.
-    ///
-    /// Can neither be `0` nor the maximum value (depending on the current size), since those would
-    /// be stored as [`NodeWithCount::Leaf`].
-    ///
-    /// Skipped by [`Hash`], since the same `children` always lead to the same `count`.
-    ///
-    /// On the other hand, it makes a lot of sense for [`Eq`] to make use of it, since it has the
-    /// potential to very quickly short-circuit the comparison of large octrees.
-    count: Count,
-    /// The child nodes.
-    children: [NodeWithLargeParentAndCount<P>; N],
-    parent: P,
-}
-
-impl<const N: usize, P: Hash> Hash for LargeParentNodeWithCount<N, P> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.children.hash(state);
-        self.parent.hash(state);
     }
 }
