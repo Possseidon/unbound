@@ -1,10 +1,10 @@
-use glam::UVec3;
+use glam::{uvec3, UVec3};
 
 use super::extent::{Extent, Splits};
 use crate::math::bounds::UBounds3;
 
 /// The location of a node within an octree.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub struct Bounds {
     /// The position within the octree where the bounds start.
     ///
@@ -26,7 +26,7 @@ impl Bounds {
     /// sure the lower bits are set to zero.
     pub const fn is_valid(min: UVec3, extent: Extent) -> bool {
         const MAX: u32 = Bounds::MAX_POINT.x;
-        let max = min.saturating_add(extent.size());
+        let max = min.saturating_add(extent.size().wrapping_sub(UVec3::ONE));
         let floored = Self::floor_min_to_extent(min, extent);
         (max.x <= MAX && max.y <= MAX && max.z <= MAX)
             && (floored.x == min.x && floored.y == min.y && floored.z == min.z)
@@ -193,39 +193,53 @@ impl Bounds {
         None
     }
 
-    /// Returns the index of these bounds within the given `extent`.
-    pub const fn index_within(self, extent: Extent) -> u128 {
-        let ([x_bit_width, y_bit_width], [x, y, z]) = self.small_index_helper(extent);
-        x as u128 | (y as u128) << x_bit_width | (z as u128) << y_bit_width
+    /// Returns the `[x, y, z]` offset relative to the parent using its `splits`.
+    pub const fn child_offset(self, splits: Splits) -> [u8; 3] {
+        let bit_offset = self.extent.splits();
+        [
+            (self.min.x >> bit_offset[0]) as u8 & !(u8::MAX << splits.x()),
+            (self.min.y >> bit_offset[1]) as u8 & !(u8::MAX << splits.y()),
+            (self.min.z >> bit_offset[2]) as u8 & !(u8::MAX << splits.z()),
+        ]
     }
 
-    /// Returns the index of these bounds within the given `extent` as a [`u8`].
-    ///
-    /// If `debug_assertions` are enabled, this panics if the result does not fit in a [`u8`].
-    pub fn small_index_within(self, extent: Extent) -> u8 {
-        if cfg!(debug_assertions) {
-            self.index_within(extent)
-                .try_into()
-                .expect("OctreeBounds index should fit in a u8")
-        } else {
-            let ([x_bit_width, y_bit_width], [x, y, z]) = self.small_index_helper(extent);
-            x as u8 | (y as u8) << x_bit_width | (z as u8) << y_bit_width
+    /// Returns the index inside the parent using its `splits`.
+    pub const fn child_index(self, splits: Splits) -> u8 {
+        let [x, y, z] = self.child_offset(splits);
+        x | y << splits.x() | z << (splits.x() + splits.y())
+    }
+
+    pub const fn with_child_offset(self, splits: Splits, offset: [u8; 3]) -> Self {
+        assert!(
+            offset[0] >> splits.x() == 0
+                && offset[1] >> splits.y() == 0
+                && offset[2] >> splits.z() == 0,
+            "child offset out of bounds"
+        );
+        let bit_offset = self.extent.splits();
+        let x_index_mask = !(!(u32::MAX << splits.x()) << bit_offset[0]);
+        let y_index_mask = !(!(u32::MAX << splits.y()) << bit_offset[1]);
+        let z_index_mask = !(!(u32::MAX << splits.z()) << bit_offset[2]);
+        Self {
+            min: uvec3(
+                self.min.x & x_index_mask | (offset[0] as u32) << bit_offset[0],
+                self.min.y & y_index_mask | (offset[1] as u32) << bit_offset[1],
+                self.min.z & z_index_mask | (offset[2] as u32) << bit_offset[2],
+            ),
+            extent: self.extent,
         }
     }
 
-    const fn small_index_helper(self, extent: Extent) -> ([u8; 2], [u32; 3]) {
-        let inner_bit_offsets = self.extent.splits();
-        let outer_bit_offsets = extent.splits();
-
-        let x_bit_width = outer_bit_offsets[0] - inner_bit_offsets[0];
-        let y_bit_width = outer_bit_offsets[1] - inner_bit_offsets[1];
-        let z_bit_width = outer_bit_offsets[2] - inner_bit_offsets[2];
-
-        let x = self.min.x >> inner_bit_offsets[0] & !(u32::MAX << x_bit_width);
-        let y = self.min.y >> inner_bit_offsets[1] & !(u32::MAX << y_bit_width);
-        let z = self.min.z >> inner_bit_offsets[2] & !(u32::MAX << z_bit_width);
-
-        ([x_bit_width, y_bit_width], [x, y, z])
+    pub const fn with_child_index(self, splits: Splits, index: u8) -> Self {
+        assert!(index >> splits.total() == 0, "child index out of bounds");
+        self.with_child_offset(
+            splits,
+            [
+                index & !(u8::MAX << splits.x()),
+                index >> splits.x() & !(u8::MAX << splits.y()),
+                index >> (splits.x() + splits.y()),
+            ],
+        )
     }
 
     /// Splits the extent of the bounds according to `splits`, keeping [`Self::min`] as is.
@@ -245,24 +259,16 @@ impl Bounds {
         })
     }
 
-    pub fn floor_to_extent(self, extent: Extent) -> Self {
+    pub const fn floor_to_extent(self, extent: Extent) -> Self {
         Self {
             min: Self::floor_min_to_extent(self.min, extent),
             extent,
         }
     }
 
-    pub fn split_to_index(mut self, splits: Splits, index: u8) -> Bounds {
-        self.extent = self.extent.split(splits);
-
-        let indices = splits.split_index(index);
-        let index_bit_offset = self.extent.splits();
-
-        self.min.x |= (indices[0] as u32) << index_bit_offset[0];
-        self.min.y |= (indices[1] as u32) << index_bit_offset[1];
-        self.min.z |= (indices[2] as u32) << index_bit_offset[2];
-
-        self
+    pub fn unsplit_unchecked(&mut self, splits: Splits) {
+        self.extent = self.extent.unsplit(splits);
+        debug_assert!(Self::is_valid(self.min, self.extent));
     }
 }
 

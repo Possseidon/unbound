@@ -55,7 +55,11 @@ impl<T: HexDiv> Builder<T> {
     /// # Panics
     ///
     /// Panics for invalid [`BuildAction`]s; see [`Self::step`].
-    pub fn build(&mut self, mut build: impl FnMut(Bounds) -> BuildAction<T>) -> T {
+    pub fn build(&mut self, mut build: impl FnMut(Bounds) -> BuildAction<T>) -> T
+    where
+        T: Clone,
+        T::Leaf: Clone + Eq,
+    {
         loop {
             if let Some(root) = self.step(build(self.bounds)) {
                 break root;
@@ -74,7 +78,11 @@ impl<T: HexDiv> Builder<T> {
     ///
     /// Panics if `action` contains a [`BuildAction::Node`] with a mismatched extent or
     /// [`BuildAction::Split`] if [`Self::bounds`] covers a single point which cannot be split.
-    pub fn step(&mut self, action: BuildAction<T>) -> Option<T> {
+    pub fn step(&mut self, action: BuildAction<T>) -> Option<T>
+    where
+        T: Clone,
+        T::Leaf: Clone + Eq,
+    {
         match action {
             BuildAction::Fill(leaf) => self.leaf_step(leaf),
             BuildAction::Node(node) => self.node_step(node),
@@ -88,7 +96,11 @@ impl<T: HexDiv> Builder<T> {
     /// Shortcut for calling [`Self::node_step`] for a leaf node with the correct extent.
     ///
     /// Unlike [`Self::node_step`] this can never panic, since the extent is assigned automatically.
-    pub fn leaf_step(&mut self, leaf: T::Leaf) -> Option<T> {
+    pub fn leaf_step(&mut self, leaf: T::Leaf) -> Option<T>
+    where
+        T: Clone,
+        T::Leaf: Clone + Eq,
+    {
         self.node_step(T::new(self.bounds.extent(), leaf))
     }
 
@@ -100,7 +112,11 @@ impl<T: HexDiv> Builder<T> {
     /// # Panics
     ///
     /// Panics if the given `node` has a mismatched extent.
-    pub fn node_step(&mut self, mut node: T) -> Option<T> {
+    pub fn node_step(&mut self, mut node: T) -> Option<T>
+    where
+        T: Clone,
+        T::Leaf: Clone + Eq,
+    {
         let extent = self.bounds.extent();
         assert_eq!(node.extent(), extent, "node extent mismatch");
 
@@ -208,33 +224,41 @@ const fn scratch_node_capacity_for(extent: Extent) -> usize {
     full_splits as usize * (Splits::MAX_VOLUME_USIZE - 1) + (1 << rest) - 1
 }
 
+/// Builds a [`BitNodeWithCount`] containing a sphere octant.
+///
+/// This is very useful to get a sufficiently complex [`HexDiv`] for testing.
+///
+/// Purely uses integer maths, so the output for any given `splits` is fully deterministic.
+#[cfg(test)]
+pub(super) fn build_sphere_octant<T: HexDiv<Leaf = bool, Parent = ()> + Clone>(splits: u8) -> T {
+    let extent = Extent::from_splits([splits; 3]).unwrap();
+    let max_distance = 1 << splits;
+    let max_distance_squared = max_distance * max_distance;
+
+    let is_inside = |point: glam::UVec3| point.length_squared() < max_distance_squared;
+
+    Builder::new(extent).build(|bounds| {
+        if is_inside(bounds.max()) {
+            BuildAction::Fill(true)
+        } else if !is_inside(bounds.min()) {
+            BuildAction::Fill(false)
+        } else {
+            BuildAction::Split(())
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use glam::UVec3;
-
     use super::*;
     use crate::hex_div::{
-        node::bool::{Count, Node, NodeWithCount},
+        node::bool::{BitNode, BitNodeWithCount, Count},
         NodeDataRef,
     };
 
     #[test]
-    fn build_sphere_octant() {
-        let extent = Extent::from_splits([8, 8, 8]).unwrap();
-        let max_distance = extent.size().x;
-        let max_distance_squared = max_distance * max_distance;
-
-        let is_inside = |point: UVec3| point.length_squared() < max_distance_squared;
-
-        let root = Builder::<NodeWithCount>::new(extent).build(|bounds| {
-            if is_inside(bounds.max()) {
-                BuildAction::Fill(true)
-            } else if !is_inside(bounds.min()) {
-                BuildAction::Fill(false)
-            } else {
-                BuildAction::Split(())
-            }
-        });
+    fn sphere_octant() {
+        let root = build_sphere_octant::<BitNodeWithCount>(8);
 
         let NodeDataRef::Parent(_, Count(volume)) = root.as_data() else {
             panic!("should be a parent node");
@@ -248,13 +272,14 @@ mod tests {
     #[test]
     #[should_panic = "attempt to split a single point"]
     fn step_with_split_panics_for_point_nodes() {
-        Builder::<Node>::new(Extent::ONE).step(BuildAction::Split(()));
+        Builder::<BitNode>::new(Extent::ONE).step(BuildAction::Split(()));
     }
 
     #[test]
     #[should_panic = "node extent mismatch"]
     fn step_with_node_panics_for_mismatched_extent() {
-        Builder::<Node>::new(Extent::ONE).step(BuildAction::Node(Node::new(Extent::MAX, true)));
+        Builder::<BitNode>::new(Extent::ONE)
+            .step(BuildAction::Node(BitNode::new(Extent::MAX, true)));
     }
 
     #[test]
@@ -290,10 +315,10 @@ mod tests {
         assert!(scratch.nodes.capacity() > TOO_SMALL_CAPACITY);
     }
 
-    /// Builds an octree that only contains a single `true` at [`OctreeBounds::MAX_POINT`].
+    /// Builds an octree that only contains a single `true` at [`Bounds::MAX_POINT`].
     ///
     /// This has the effect of requiring the maximum possible amount of capacity inside `scratch`.
-    fn build_with_max_capacity(extent: Extent, scratch: Scratch<Node>) -> Scratch<Node> {
+    fn build_with_max_capacity(extent: Extent, scratch: Scratch<BitNode>) -> Scratch<BitNode> {
         let max_point = extent.size() - 1;
         let mut builder = Builder::with_scratch(extent, scratch);
         builder.build(|bounds| {

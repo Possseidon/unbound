@@ -46,7 +46,7 @@ impl UBounds3 {
     }
 
     pub const fn from_point(point: UVec3) -> Self {
-        if let Some(bounds) = Self::checked_new(point, UVec3::ONE) {
+        if let Some(bounds) = Self::checked_new(point, point.wrapping_add(UVec3::ONE)) {
             bounds
         } else {
             panic!("point must be less than UVec3::MAX");
