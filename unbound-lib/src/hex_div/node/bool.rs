@@ -6,12 +6,12 @@ use std::{
 use arrayvec::ArrayVec;
 use educe::Educe;
 
+use super::{HexDivNode, NodeDataRef, NodeRef};
 use crate::hex_div::{
     bounds::Bounds,
     cache::{Cache, CacheIn},
     extent::{Extent, Splits},
     iter::Iter,
-    HexDivNode, NodeDataRef, NodeRef,
 };
 
 /// A compact representation of a [`HexDivNode`] storing [`bool`]s.

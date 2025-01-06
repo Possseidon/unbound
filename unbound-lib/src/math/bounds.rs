@@ -10,8 +10,8 @@ pub struct UBounds3 {
 }
 
 impl UBounds3 {
-    pub const ZERO: Self = Self::with_extent_at_origin(UVec3::ZERO);
-    pub const UNIT: Self = Self::with_extent_at_origin(UVec3::ONE);
+    pub const ZERO: Self = Self::with_size_at_origin(UVec3::ZERO);
+    pub const UNIT: Self = Self::with_size_at_origin(UVec3::ONE);
     pub const FULL: Self = Self::new(UVec3::MIN, UVec3::MAX);
 
     pub const fn checked_new(lower: UVec3, upper: UVec3) -> Option<Self> {
@@ -30,15 +30,15 @@ impl UBounds3 {
         }
     }
 
-    pub const fn with_extent_at_origin(extent: UVec3) -> Self {
+    pub const fn with_size_at_origin(size: UVec3) -> Self {
         Self {
             lower: UVec3::ZERO,
-            upper: extent,
+            upper: size,
         }
     }
 
-    pub const fn with_extent_at(offset: UVec3, extent: UVec3) -> Self {
-        if let Some(bounds) = Self::checked_new(offset, offset.wrapping_add(extent)) {
+    pub const fn with_size_at(offset: UVec3, size: UVec3) -> Self {
+        if let Some(bounds) = Self::checked_new(offset, offset.wrapping_add(size)) {
             bounds
         } else {
             panic!("upper bounds must not exceed UVec3::MAX");
@@ -63,8 +63,8 @@ impl UBounds3 {
         self.upper
     }
 
-    /// The extent/size of the bounds.
-    pub const fn extent(self) -> UVec3 {
+    /// The size of the bounds.
+    pub const fn size(self) -> UVec3 {
         // only using wrapping_sub for const, can never overflow
         self.upper.wrapping_sub(self.lower)
     }

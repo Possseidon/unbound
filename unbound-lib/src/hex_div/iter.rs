@@ -5,8 +5,8 @@ use educe::Educe;
 use super::{
     bounds::Bounds,
     extent::{SplitList, Splits},
+    node::{HexDivNode, NodeRef, ParentNodeRef},
     visit::{Enter, VisitNode},
-    HexDivNode, NodeRef, ParentNodeRef,
 };
 
 /// An iterator that iterates over the nodes of a [`HexDivNode`].
@@ -297,8 +297,10 @@ mod tests {
     use crate::hex_div::{
         builder::{build_sphere_octant, BuildAction, Builder},
         extent::Extent,
-        node::bool::{BitNode, Count, NoBitCache},
-        NodeDataRef,
+        node::{
+            bool::{BitNode, Count, NoBitCache},
+            NodeDataRef,
+        },
     };
 
     #[test]

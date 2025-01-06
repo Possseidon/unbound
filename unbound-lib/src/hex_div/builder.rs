@@ -6,7 +6,7 @@ use educe::Educe;
 use super::{
     bounds::Bounds,
     extent::{Extent, SplitList, Splits},
-    HexDivNode,
+    node::HexDivNode,
 };
 
 /// Allows building a [`HexDivNode`] incrementally or from a callback.
@@ -254,8 +254,8 @@ pub(super) fn build_sphere_octant<T: HexDivNode<Leaf = bool, Parent = ()> + Clon
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex_div::{
-        node::bool::{BitNode, Count},
+    use crate::hex_div::node::{
+        bool::{BitNode, Count},
         NodeDataRef,
     };
 

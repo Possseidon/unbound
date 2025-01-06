@@ -1,4 +1,7 @@
-use super::{extent::Extent, HexDivNode, NodeDataRef};
+use super::{
+    extent::Extent,
+    node::{HexDivNode, NodeDataRef},
+};
 
 /// A value that is calculatable from a collection of `T` and already calculated [`Cache<T>`].
 ///

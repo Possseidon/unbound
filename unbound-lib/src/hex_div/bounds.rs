@@ -102,7 +102,7 @@ impl Bounds {
     }
 
     pub const fn to_ubounds3(self) -> UBounds3 {
-        UBounds3::with_extent_at(self.min, self.extent().size())
+        UBounds3::with_size_at(self.min, self.extent().size())
     }
 
     /// The lower bound (inclusive).

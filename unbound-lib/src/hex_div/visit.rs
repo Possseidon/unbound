@@ -1,7 +1,11 @@
 use educe::Educe;
 use glam::UVec3;
 
-use super::{bounds::Bounds, extent::Splits, HexDivNode, ParentNodeRef};
+use super::{
+    bounds::Bounds,
+    extent::Splits,
+    node::{HexDivNode, ParentNodeRef},
+};
 use crate::math::bounds::UBounds3;
 
 /// Skips over nodes that lie outside of `target`.
