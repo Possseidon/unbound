@@ -38,7 +38,7 @@ The biggest part here is terrain.
 
 Minecraft stores its terrain in so called "chunks" and displays it in a classic cubic voxel fashion with somewhat limited render distance where one block is roughly one meter in size.
 
-Unbounds on the other hand makes use of Octrees to store large areas of identical blocks such as air or stone in a very compact fashion, which should (at least in theory) result in worlds requiring much less memory while also giving a solid foundation for having insanely high render distances by just reducing the level of detail.
+Unbound on the other hand makes use of Octrees to store large areas of identical blocks such as air or stone in a very compact fashion, which should (at least in theory) result in worlds requiring much less memory while also giving a solid foundation for having insanely high render distances by just reducing the level of detail.
 
 This also makes it possible for terrain to have a higher resolution, twice as high (2x2x2 equals one Minecraft block), without being too taxing on memory. While I probably could go even finer with resolution, I feel like it starts getting hard/tedious to work. That of course also depends on the tools you have to edit the terrain, but I feel like twice the resolution of Minecraft just feels right to me.
 
