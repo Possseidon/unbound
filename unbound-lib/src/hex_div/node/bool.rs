@@ -458,7 +458,7 @@ impl<P> HexDiv for BitNodeWithInlineParentAndCount<P> {
 
     fn as_data(&self) -> NodeDataRef<Self> {
         match &self.0 {
-            ReprWithBoth::Leaf(_, leaf) => return NodeDataRef::Leaf(*leaf),
+            ReprWithBoth::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
             ReprWithBoth::Leaves(_, _, parent, leaves) => {
                 NodeDataRef::Parent(parent, Count(leaves.count_ones().into()))
             }
