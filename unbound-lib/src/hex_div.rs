@@ -1,6 +1,7 @@
 pub mod bounds;
 pub mod builder;
 pub mod cache;
+pub mod collections;
 pub mod extent;
 pub mod iter;
 pub mod node;
@@ -22,22 +23,23 @@ use itertools::zip_eq;
 /// The [`node`] submodule contains implementors of this trait:
 ///
 /// - [`node::Node`] as a general purpose implementation that works for all types
-/// - [`node::bool::Node`] which is limited to [`bool`], but has very efficient storage
+/// - [`node::bool::BitNode`] which is limited to [`bool`], but has very efficient storage
 ///
-/// Since a [`HexDiv`] is usually made up of a lot of nodes, the concrete node type should generally
-/// strive for a small footprint; two pointers ideally.
+/// Since a [`HexDivNode`] is usually made up of a lot of nodes, the concrete node type should
+/// generally strive for a small footprint; two pointers ideally.
 ///
 /// # Not an [Octree]
 ///
-/// When compared to a normal [Octree], a [`HexDiv`]:
+/// When compared to a normal [Octree], a [`HexDivNode`]:
 ///
 /// - Is more flexible in its shape
 /// - Is better optimized for cache locality by having nodes store more direct children
 ///
 /// An [Octree] is generally limited to a cube shape with a side length that is a power of two. A
-/// [`HexDiv`] lifts the "cube shape" restriction, allowing any cuboid shape, only requiring each
-/// individual side length to be a power of two. This has the nice benefit, that a [`HexDiv`] can
-/// also be used in place of a [Quadtree] (a 2D [Octree]) or even for just a 1D strip.
+/// [`HexDivNode`] lifts the "cube shape" restriction, allowing any cuboid shape, only requiring
+/// each individual side length to be a power of two. This has the nice benefit, that a
+/// [`HexDivNode`] can also be used in place of a [Quadtree] (a 2D [Octree]) or even for just a 1D
+/// strip.
 ///
 /// # Parent Nodes
 ///
@@ -51,8 +53,8 @@ use itertools::zip_eq;
 ///
 /// [Octree]: https://en.wikipedia.org/wiki/Octree
 /// [Quadtree]: https://en.wikipedia.org/wiki/Quadtree
-pub trait HexDiv: Sized {
-    /// The type of leaf values that this [`HexDiv`] holds.
+pub trait HexDivNode: Sized {
+    /// The type of leaf values that this [`HexDivNode`] holds.
     ///
     /// To actually be useful, leaves must be:
     ///
@@ -77,7 +79,7 @@ pub trait HexDiv: Sized {
     type Parent;
 
     /// Can be queried cheaply for any parent node.
-    type Cache<'a>: Cache<'a, Self::LeafRef<'a>>
+    type Cache<'a>: Cache<Self::LeafRef<'a>>
     where
         Self::Leaf: 'a;
 
@@ -252,12 +254,13 @@ pub trait HexDiv: Sized {
 }
 
 /// Shorthand to access the [`Cache::Ref`] on a [`HexDiv::Cache`].
-pub type CacheRef<'a, T> = <<T as HexDiv>::Cache<'a> as Cache<'a, <T as HexDiv>::LeafRef<'a>>>::Ref;
+pub type CacheRef<'a, T> =
+    <<T as HexDivNode>::Cache<'a> as Cache<<T as HexDivNode>::LeafRef<'a>>>::Ref<'a>;
 
-/// A reference to the data of a [`HexDiv`] node.
+/// A reference to the data of a [`HexDivNode`] node.
 #[derive(Educe)]
 #[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub enum NodeDataRef<'a, T: HexDiv>
+pub enum NodeDataRef<'a, T: HexDivNode>
 where
     T::Leaf: 'a,
 {
@@ -265,7 +268,7 @@ where
     Parent(&'a T::Parent, CacheRef<'a, T>),
 }
 
-impl<'a, T: HexDiv> NodeDataRef<'a, T> {
+impl<'a, T: HexDivNode> NodeDataRef<'a, T> {
     pub fn is_leaf(self) -> bool {
         matches!(self, Self::Leaf(..))
     }
@@ -275,17 +278,17 @@ impl<'a, T: HexDiv> NodeDataRef<'a, T> {
     }
 }
 
-/// A reference to a [`HexDiv`] node.
+/// A reference to a [`HexDivNode`] node.
 ///
 /// [`NodeRef::Leaf`] is used (exclusively) for virtual nodes used by leaves nodes.
 #[derive(Educe)]
 #[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub enum NodeRef<'a, T: HexDiv> {
+pub enum NodeRef<'a, T: HexDivNode> {
     Node(&'a T),
     Leaf(T::LeafRef<'a>),
 }
 
-impl<'a, T: HexDiv> NodeRef<'a, T> {
+impl<'a, T: HexDivNode> NodeRef<'a, T> {
     pub fn data(self) -> NodeDataRef<'a, T> {
         match self {
             Self::Node(node) => node.as_data(),
@@ -306,12 +309,12 @@ impl<'a, T: HexDiv> NodeRef<'a, T> {
     }
 }
 
-/// A reference to a [`HexDiv`] node that is known to have children.
+/// A reference to a [`HexDivNode`] node that is known to have children.
 #[derive(Educe)]
 #[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct ParentNodeRef<'a, T>(&'a T);
 
-impl<'a, T: HexDiv> ParentNodeRef<'a, T> {
+impl<'a, T: HexDivNode> ParentNodeRef<'a, T> {
     pub fn new(node: &'a T) -> Option<Self> {
         node.as_data().is_parent().then_some(Self(node))
     }
@@ -327,7 +330,7 @@ pub struct HexDivDebug<'a, T> {
     split_index: usize,
 }
 
-impl<'a, T: HexDiv> std::fmt::Debug for HexDivDebug<'a, T>
+impl<'a, T: HexDivNode> std::fmt::Debug for HexDivDebug<'a, T>
 where
     T::LeafRef<'a>: std::fmt::Debug,
     T::Parent: std::fmt::Debug,
@@ -364,7 +367,7 @@ struct ChildrenDebug<'a, T> {
     split_index: usize,
 }
 
-impl<'a, T: HexDiv> std::fmt::Debug for ChildrenDebug<'a, T>
+impl<'a, T: HexDivNode> std::fmt::Debug for ChildrenDebug<'a, T>
 where
     T::LeafRef<'a>: std::fmt::Debug,
     T::Parent: std::fmt::Debug,

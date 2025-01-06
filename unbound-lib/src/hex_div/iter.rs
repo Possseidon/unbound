@@ -6,10 +6,10 @@ use super::{
     bounds::Bounds,
     extent::{SplitList, Splits},
     visit::{Enter, VisitNode},
-    HexDiv, NodeRef, ParentNodeRef,
+    HexDivNode, NodeRef, ParentNodeRef,
 };
 
-/// An iterator that iterates over the nodes of a [`HexDiv`].
+/// An iterator that iterates over the nodes of a [`HexDivNode`].
 ///
 /// By default, all nodes are visited:
 ///
@@ -23,9 +23,9 @@ use super::{
 /// }
 /// ```
 ///
-/// However, since [`HexDiv`]'s are intended to cover potentially
-/// huge areas, this is often not feasible. For this reason this type provides various means to skip
-/// over specific nodes including all of their children.
+/// However, since [`HexDivNode`]'s are intended to cover potentially huge areas, this is often not
+/// feasible. For this reason this type provides various means to skip over specific nodes including
+/// all of their children.
 ///
 /// The most straightforward way is to use [`Self::visit`]. It combines the iterator with a callback
 /// that can decide which nodes to enter.
@@ -44,7 +44,7 @@ use super::{
 /// ```
 ///
 /// Unfortunately, there are cases where this approach doesn't work. Most notably, when trying to
-/// iterate multiple [`HexDiv`]s at once (similar to e.g. [`std::iter::zip`]) this can lead to
+/// iterate multiple [`HexDivNode`]s at once (similar to e.g. [`std::iter::zip`]) this can lead to
 /// issues, if the two visit callbacks need to communicate with each other. While this can in theory
 /// be solved with e.g. [interior mutability], there is a way to avoid the callback entirely:
 ///
@@ -86,7 +86,7 @@ use super::{
 #[derive(Educe)]
 #[educe(Clone, Default, Debug)]
 pub struct Iter<'a, T> {
-    /// Represents the iterator's current position within the [`HexDiv`].
+    /// Represents the iterator's current position within the [`HexDivNode`].
     ///
     /// The position has two possible cases:
     ///
@@ -101,7 +101,7 @@ pub struct Iter<'a, T> {
     ///    - The next call to [`Self::next`] will yield this node.
     ///    - [`Self::skip_children`] and [`Self::only_child`] will panic in this state.
     bounds: Bounds,
-    /// Indicates, that the root of the [`HexDiv`] should be yielded.
+    /// Indicates, that the root of the [`HexDivNode`] should be yielded.
     ///
     /// Upon the first call to [`Self::next`] it is either cleared or moved into [`Self::parents`].
     root: Option<&'a T>,
@@ -111,7 +111,7 @@ pub struct Iter<'a, T> {
     enter_only: BitArray<u16>,
 }
 
-impl<'a, T: HexDiv> Iter<'a, T> {
+impl<'a, T: HexDivNode> Iter<'a, T> {
     pub(super) fn new(root: &'a T) -> Self {
         Self {
             bounds: root.extent().into(),
@@ -255,7 +255,7 @@ impl<'a, T: HexDiv> Iter<'a, T> {
     }
 }
 
-impl<'a, T: HexDiv> Iterator for Iter<'a, T> {
+impl<'a, T: HexDivNode> Iterator for Iter<'a, T> {
     type Item = (Bounds, NodeRef<'a, T>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -263,13 +263,13 @@ impl<'a, T: HexDiv> Iterator for Iter<'a, T> {
     }
 }
 
-pub struct Visit<'a, T: HexDiv, V> {
+pub struct Visit<'a, T: HexDivNode, V> {
     iter: Iter<'a, T>,
     visit: V,
     prev_node: Option<VisitNode<'a, T>>,
 }
 
-impl<'a, T: HexDiv, V: FnMut(VisitNode<'a, T>) -> Enter> Iterator for Visit<'a, T, V> {
+impl<'a, T: HexDivNode, V: FnMut(VisitNode<'a, T>) -> Enter> Iterator for Visit<'a, T, V> {
     type Item = (Bounds, NodeRef<'a, T>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -297,7 +297,7 @@ mod tests {
     use crate::hex_div::{
         builder::{build_sphere_octant, BuildAction, Builder},
         extent::Extent,
-        node::bool::{BitNode, BitNodeWithCount, Count},
+        node::bool::{BitNode, Count, NoBitCache},
         NodeDataRef,
     };
 
@@ -307,7 +307,7 @@ mod tests {
 
         let nodes = root.iter().counts_by(|(_, node)| node.data());
 
-        assert_eq!(nodes[&NodeDataRef::Parent(&(), ())], 483);
+        assert_eq!(nodes[&NodeDataRef::Parent(&(), NoBitCache)], 483);
         assert_eq!(nodes[&NodeDataRef::Leaf(false)], 15_081);
         assert_eq!(nodes[&NodeDataRef::Leaf(true)], 15_349);
     }
@@ -321,7 +321,7 @@ mod tests {
             .visit(|_| Enter::All)
             .counts_by(|(_, node)| node.data());
 
-        assert_eq!(nodes[&NodeDataRef::Parent(&(), ())], 483);
+        assert_eq!(nodes[&NodeDataRef::Parent(&(), NoBitCache)], 483);
         assert_eq!(nodes[&NodeDataRef::Leaf(false)], 15_081);
         assert_eq!(nodes[&NodeDataRef::Leaf(true)], 15_349);
     }
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn visit_only_yields_specific_nodes() {
-        let root = build_sphere_octant::<BitNodeWithCount>(6);
+        let root = build_sphere_octant::<BitNode<(), Count>>(6);
         let bounds = Bounds::from(root.extent());
         let splits = root.splits();
 
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     #[should_panic = "iteration not yet started"]
     fn skip_children_panics_if_iteration_is_not_yet_started() {
-        let root: BitNode = HexDiv::with_default(Extent::ONE);
+        let root: BitNode = HexDivNode::with_default(Extent::ONE);
         let mut iter = root.iter();
 
         iter.skip_children();
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     #[should_panic = "iteration not yet started"]
     fn only_child_panics_if_iteration_is_not_yet_started() {
-        let root: BitNode = HexDiv::with_default(Extent::ONE);
+        let root: BitNode = HexDivNode::with_default(Extent::ONE);
         let mut iter = root.iter();
 
         iter.only_child(0);
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     #[should_panic = "iteration already over"]
     fn skip_children_panics_if_iteration_is_already_over() {
-        let root: BitNode = HexDiv::with_default(Extent::ONE);
+        let root: BitNode = HexDivNode::with_default(Extent::ONE);
         let mut iter = root.iter();
         assert!(iter.next().is_some());
 
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     #[should_panic = "iteration already over"]
     fn only_child_panics_if_iteration_is_already_over() {
-        let root: BitNode = HexDiv::with_default(Extent::ONE);
+        let root: BitNode = HexDivNode::with_default(Extent::ONE);
         let mut iter = root.iter();
         assert!(iter.next().is_some());
 

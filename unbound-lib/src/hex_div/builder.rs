@@ -6,12 +6,12 @@ use educe::Educe;
 use super::{
     bounds::Bounds,
     extent::{Extent, SplitList, Splits},
-    HexDiv,
+    HexDivNode,
 };
 
-/// Allows building a [`HexDiv`] incrementally or from a callback.
+/// Allows building a [`HexDivNode`] incrementally or from a callback.
 #[derive(Clone, Debug)]
-pub struct Builder<T: HexDiv> {
+pub struct Builder<T: HexDivNode> {
     /// The bounds that will be processed by the next call to [`Self::step`].
     bounds: Bounds,
     /// The number of splits
@@ -22,8 +22,8 @@ pub struct Builder<T: HexDiv> {
     parents: ArrayVec<T::Parent, { SplitList::MAX }>,
 }
 
-impl<T: HexDiv> Builder<T> {
-    /// Constructs a new [`Builder`] that can build [`HexDiv`]s with the given `extent`.
+impl<T: HexDivNode> Builder<T> {
+    /// Constructs a new [`Builder`] that can build [`HexDivNode`]s with the given `extent`.
     pub fn new(extent: Extent) -> Self {
         Self::with_scratch(extent, Default::default())
     }
@@ -43,14 +43,15 @@ impl<T: HexDiv> Builder<T> {
         self.bounds
     }
 
-    /// Builds a [`HexDiv`] using the given `build` callback.
+    /// Builds a [`HexDivNode`] using the given `build` callback.
     ///
     /// This is just a convencience for calling [`Self::step`] with [`Self::bounds`] until it
     /// returns [`Some`]. This means, it can be called, even if a few steps were already done by
     /// calling [`Self::step`] manually.
     ///
-    /// Similar to [`Self::step`], [`Self::build`] can be called again to build another [`HexDiv`]
-    /// of the same type and extent, reusing its existing [`Scratch`] allocations.
+    /// Similar to [`Self::step`], [`Self::build`] can be called again to build another
+    /// [`HexDivNode`] of the same type and extent, reusing its existing [`Scratch`]
+    /// allocations.
     ///
     /// # Panics
     ///
@@ -71,8 +72,8 @@ impl<T: HexDiv> Builder<T> {
     ///
     /// This simply delegates to [`Self::leaf_step`], [`Self::node_step`] and [`Self::parent_step`].
     ///
-    /// Returns [`Some`] if the [`HexDiv`] was fully built and further calls will start building a
-    /// new [`HexDiv`] from scratch, though reusing [`Scratch`] allocations.
+    /// Returns [`Some`] if the [`HexDivNode`] was fully built and further calls will start building
+    /// a new [`HexDivNode`] from scratch, though reusing [`Scratch`] allocations.
     ///
     /// # Panics
     ///
@@ -106,8 +107,8 @@ impl<T: HexDiv> Builder<T> {
 
     /// Sets the current [`Self::bounds`] to the given `node` and advances [`Self::bounds`].
     ///
-    /// Returns [`Some`] if the [`HexDiv`] was fully built and further calls will start building a
-    /// new [`HexDiv`] from scratch, though reusing [`Scratch`] allocations.
+    /// Returns [`Some`] if the [`HexDivNode`] was fully built and further calls will start building
+    /// a new [`HexDivNode`] from scratch, though reusing [`Scratch`] allocations.
     ///
     /// # Panics
     ///
@@ -176,7 +177,7 @@ impl<T: HexDiv> Builder<T> {
 }
 
 /// Used as input to [`Builder::step`] to decide what to build.
-pub enum BuildAction<T: HexDiv> {
+pub enum BuildAction<T: HexDivNode> {
     /// Fills the bounds with the given value.
     ///
     /// This is just a convenience for [`BuildAction::Node`] without having to pass the extent.
@@ -226,11 +227,13 @@ const fn scratch_node_capacity_for(extent: Extent) -> usize {
 
 /// Builds a [`BitNodeWithCount`] containing a sphere octant.
 ///
-/// This is very useful to get a sufficiently complex [`HexDiv`] for testing.
+/// This is very useful to get a sufficiently complex [`HexDivNode`] for testing.
 ///
 /// Purely uses integer maths, so the output for any given `splits` is fully deterministic.
 #[cfg(test)]
-pub(super) fn build_sphere_octant<T: HexDiv<Leaf = bool, Parent = ()> + Clone>(splits: u8) -> T {
+pub(super) fn build_sphere_octant<T: HexDivNode<Leaf = bool, Parent = ()> + Clone>(
+    splits: u8,
+) -> T {
     let extent = Extent::from_splits([splits; 3]).unwrap();
     let max_distance = 1 << splits;
     let max_distance_squared = max_distance * max_distance;
@@ -252,13 +255,13 @@ pub(super) fn build_sphere_octant<T: HexDiv<Leaf = bool, Parent = ()> + Clone>(s
 mod tests {
     use super::*;
     use crate::hex_div::{
-        node::bool::{BitNode, BitNodeWithCount, Count},
+        node::bool::{BitNode, Count},
         NodeDataRef,
     };
 
     #[test]
     fn sphere_octant() {
-        let root = build_sphere_octant::<BitNodeWithCount>(8);
+        let root = build_sphere_octant::<BitNode<(), Count>>(8);
 
         let NodeDataRef::Parent(_, Count(volume)) = root.as_data() else {
             panic!("should be a parent node");

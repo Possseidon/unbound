@@ -10,7 +10,7 @@ use super::{
     cache::{Cache, CacheIn},
     extent::{Extent, Splits},
     iter::Iter,
-    HexDiv, NodeDataRef, NodeRef,
+    HexDivNode, NodeDataRef, NodeRef,
 };
 
 /// A node within an octree, either holding a leaf with a value of type `T` or more [`Node`]s.
@@ -34,9 +34,9 @@ use super::{
 #[educe(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Node<T, P = (), C = NoCache>(Repr<T, P, C>);
 
-impl<T, P, C> HexDiv for Node<T, P, C>
+impl<T, P, C> HexDivNode for Node<T, P, C>
 where
-    C: for<'a> Cache<'a, &'a T, Ref = &'a C>,
+    C: for<'a> Cache<&'a T, Ref<'a> = &'a C>,
 {
     type Leaf = T;
 
@@ -176,7 +176,7 @@ where
 
 impl<'a, T, P, C> IntoIterator for &'a Node<T, P, C>
 where
-    C: for<'b> Cache<'b, &'b T, Ref = &'b C>,
+    C: for<'b> Cache<&'b T, Ref<'b> = &'b C>,
 {
     type Item = (Bounds, NodeRef<'a, Node<T, P, C>>);
     type IntoIter = Iter<'a, Node<T, P, C>>;
@@ -189,10 +189,10 @@ where
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NoCache;
 
-impl<'a, T> Cache<'a, T> for NoCache {
-    type Ref = &'a NoCache;
+impl<T> Cache<T> for NoCache {
+    type Ref<'a> = &'a NoCache;
 
-    fn compute_cache(_: Extent, _: impl IntoIterator<Item = CacheIn<'a, T, Self>>) -> Self {
+    fn compute_cache<'a>(_: Extent, _: impl IntoIterator<Item = CacheIn<'a, T, Self>>) -> Self {
         Self
     }
 }
@@ -223,7 +223,7 @@ type NewParent<T, const N: usize, P, C> =
 
 impl<T, P, C> Repr<T, P, C>
 where
-    C: for<'a> Cache<'a, &'a T, Ref = &'a C>,
+    C: for<'a> Cache<&'a T, Ref<'a> = &'a C>,
 {
     fn from_leaves<const N: usize>(
         new: NewLeaves<T, N, P, C>,

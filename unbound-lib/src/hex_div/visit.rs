@@ -1,16 +1,16 @@
 use educe::Educe;
 use glam::UVec3;
 
-use super::{bounds::Bounds, extent::Splits, HexDiv, ParentNodeRef};
+use super::{bounds::Bounds, extent::Splits, HexDivNode, ParentNodeRef};
 use crate::math::bounds::UBounds3;
 
 /// Skips over nodes that lie outside of `target`.
-pub fn within<T: HexDiv>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
+pub fn within<T: HexDivNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
     move |node| Enter::within(node.bounds(), node.node().get().splits(), target)
 }
 
 /// Skips over nodes that lie outside or inside `target`.
-pub fn until<T: HexDiv>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
+pub fn until<T: HexDivNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
     move |node| Enter::until(node.bounds(), node.node().get().splits(), target)
 }
 
@@ -21,7 +21,7 @@ pub struct VisitNode<'a, T> {
     pub(super) node: ParentNodeRef<'a, T>,
 }
 
-impl<'a, T: HexDiv> VisitNode<'a, T> {
+impl<'a, T: HexDivNode> VisitNode<'a, T> {
     /// The bounds of [`Self::node`].
     pub fn bounds(self) -> Bounds {
         self.bounds

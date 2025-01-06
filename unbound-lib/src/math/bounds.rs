@@ -1,4 +1,4 @@
-use glam::{IVec3, UVec3};
+use glam::UVec3;
 
 /// Unsigned integer axis-aligned bounds in 3D-space.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
@@ -90,15 +90,4 @@ impl UBounds3 {
             && (self.lower.y <= other.lower.y && other.upper.y <= self.upper.y)
             && (self.lower.z <= other.lower.z && other.upper.z <= self.upper.z)
     }
-}
-
-/// Signed integer axis-aligned bounds in 3D-space.
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub struct IBounds3 {
-    lower: IVec3,
-    upper: IVec3,
-}
-
-impl IBounds3 {
-    // TODO: Copy UBounds3 interface
 }
