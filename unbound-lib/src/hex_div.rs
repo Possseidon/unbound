@@ -267,7 +267,7 @@ where
     Parent(&'a T::Parent, CacheRef<'a, T>),
 }
 
-impl<'a, T: HexDivNode> NodeDataRef<'a, T> {
+impl<T: HexDivNode> NodeDataRef<'_, T> {
     pub fn is_leaf(self) -> bool {
         matches!(self, Self::Leaf(..))
     }
