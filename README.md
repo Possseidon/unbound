@@ -1,6 +1,10 @@
 # Unbound
 
-A [Minecraft](https://www.minecraft.net/en-us/about-minecraft) inspired game/-engine featuring non-blocky, infinite terrain based on [marching cubes](https://en.wikipedia.org/wiki/Marching_cubes) built using [bevy](https://bevyengine.org/).
+TODO: Badges
+
+A [Minecraft](https://www.minecraft.net/en-us/about-minecraft) inspired game/-engine featuring non-blocky, near-infinite [smooth](https://en.wikipedia.org/wiki/Marching_cubes) terrain built on top of the [bevy](https://bevyengine.org/) game engine.
+
+See the [Foam](https://foambubble.github.io/foam/) based [Project Overview](foam/project-overview.md) for more details on what I want Unbound to be.
 
 ## Project Structure
 
