@@ -130,7 +130,7 @@ where
 
     fn as_data(&self) -> NodeDataRef<Self> {
         match &self.0 {
-            Repr::Leaf(_, leaf) => return NodeDataRef::Leaf(leaf),
+            Repr::Leaf(_, leaf) => NodeDataRef::Leaf(leaf),
             Repr::Leaves1(_, _, node) => NodeDataRef::Parent(&node.parent, &node.cache),
             Repr::Leaves2(_, _, node) => NodeDataRef::Parent(&node.parent, &node.cache),
             Repr::Leaves3(_, _, node) => NodeDataRef::Parent(&node.parent, &node.cache),
