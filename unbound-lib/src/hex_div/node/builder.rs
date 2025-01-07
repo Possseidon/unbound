@@ -3,10 +3,10 @@ use std::mem::take;
 use arrayvec::ArrayVec;
 use educe::Educe;
 
-use super::{
+use super::HexDivNode;
+use crate::hex_div::{
     bounds::Bounds,
     extent::{Extent, SplitList, Splits},
-    node::HexDivNode,
 };
 
 /// Allows building a [`HexDivNode`] incrementally or from a callback.

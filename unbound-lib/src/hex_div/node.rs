@@ -1,4 +1,7 @@
 pub mod bool;
+pub mod builder;
+pub mod iter;
+pub mod visit;
 
 use std::{
     iter::{once, repeat_n},
@@ -7,13 +10,13 @@ use std::{
 
 use arrayvec::ArrayVec;
 use educe::Educe;
+use iter::Iter;
 use itertools::zip_eq;
 
 use super::{
     bounds::Bounds,
     cache::{Cache, CacheIn},
     extent::{Extent, Splits},
-    iter::Iter,
 };
 
 /// A node within an octree, either holding a leaf with a value of type `T` or more [`Node`]s.

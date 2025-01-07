@@ -1,12 +1,11 @@
 use educe::Educe;
 use glam::UVec3;
 
-use super::{
-    bounds::Bounds,
-    extent::Splits,
-    node::{HexDivNode, ParentNodeRef},
+use super::{HexDivNode, ParentNodeRef};
+use crate::{
+    hex_div::{bounds::Bounds, extent::Splits},
+    math::bounds::UBounds3,
 };
-use crate::math::bounds::UBounds3;
 
 /// Skips over nodes that lie outside of `target`.
 pub fn within<T: HexDivNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
