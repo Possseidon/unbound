@@ -6,7 +6,7 @@ use std::{mem::replace, ops::Deref};
 /// actually different from the original.
 ///
 /// To avoid name-clashes, the methods of [`Mut`] itself are associated functions, called using
-/// fully qualified snytax (similar to e.g. [`Arc`](std::sync::Arc)):
+/// fully qualified syntax (similar to e.g. [`Arc`](std::sync::Arc)):
 ///
 /// ```
 /// # use unbound_lib::change_tracking::Mut;
@@ -24,8 +24,7 @@ use std::{mem::replace, ops::Deref};
 /// # use unbound_lib::change_tracking::Mut;
 /// let mut value = f32::NAN;
 /// let mut change_tracker = Mut::new(&mut value);
-/// Mut::set(&mut change_tracker, 42.0);
-/// Mut::set(&mut change_tracker, f32::NAN); // still considered "changed"
+/// Mut::set(&mut change_tracker, f32::NAN); // considered "changed" despite being the "same"
 /// assert!(Mut::changed(&change_tracker));
 /// Mut::reset(&mut change_tracker); // reset to the rescue!
 /// assert!(!Mut::changed(&change_tracker));
