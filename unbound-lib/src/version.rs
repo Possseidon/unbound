@@ -27,7 +27,7 @@ impl Version {
     /// The highest possible [`Version`] made up of [`u64::MAX`] for each component.
     pub const MAX: Self = Self::Release(ReleaseVersion::MAX);
 
-    /// Constructs a new [`Version`] from the given major, minor and patch number.
+    /// Constructs a [`Version`] from the given major, minor and patch number.
     ///
     /// # Panics
     ///
@@ -41,7 +41,7 @@ impl Version {
         }
     }
 
-    /// Returns `true` if the version is not yet released.
+    /// Whether the version is not yet released.
     pub fn is_dev(self) -> bool {
         matches!(self, Self::Dev(..))
     }
@@ -55,7 +55,7 @@ impl Version {
         }
     }
 
-    /// Returns `true` if the version is released.
+    /// Whether the version is released.
     pub fn is_release(self) -> bool {
         matches!(self, Self::Release(..))
     }
@@ -156,7 +156,7 @@ impl DevVersion {
         patch: u64::MAX,
     };
 
-    /// Creates a new [`DevVersion`] from the given minor and patch number.
+    /// Constructs a [`DevVersion`] from the given minor and patch number.
     pub fn new(minor: NonZeroU64, patch: u64) -> Self {
         Self { minor, patch }
     }
@@ -228,7 +228,7 @@ impl ReleaseVersion {
         patch: u64::MAX,
     };
 
-    /// Creates a new [`ReleaseVersion`] from the given minor and patch number.
+    /// Constructs a [`ReleaseVersion`] from the given minor and patch number.
     pub fn new(major: NonZeroU64, minor: u64, patch: u64) -> Self {
         Self {
             major,
@@ -365,7 +365,7 @@ pub struct DevVersionReq {
 }
 
 impl DevVersionReq {
-    /// Creates a new dev version requirement with the given minor and patch version.
+    /// Constructs a [`DevVersionReq`] with the given minor and patch version.
     pub fn new(minor_exact: NonZeroU64, patch_min: u64) -> Self {
         Self {
             minor_exact,
@@ -405,7 +405,7 @@ pub struct ReleaseVersionReq {
 }
 
 impl ReleaseVersionReq {
-    /// Creates a new release version requirement with the given major and minor version.
+    /// Constructs a [`ReleaseVersionReq`] with the given major and minor version.
     pub fn new(major_exact: NonZeroU64, minor_min: u64) -> Self {
         Self {
             major_exact,
