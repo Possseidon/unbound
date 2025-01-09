@@ -41,7 +41,7 @@ pub struct Mut<'a, T> {
 }
 
 impl<'a, T> Mut<'a, T> {
-    /// Constructs a new [`Mut`] from a mutable reference.
+    /// Constructs a [`Mut`] from a mutable reference.
     pub fn new(value: &'a mut T) -> Self {
         Self {
             value,
