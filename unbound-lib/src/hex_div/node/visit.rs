@@ -1,20 +1,20 @@
 use educe::Educe;
-use glam::UVec3;
 
 use super::{HexDivNode, ParentNodeRef};
 use crate::{
-    hex_div::{bounds::Bounds, extent::Splits},
+    hex_div::{bounds::Bounds, extent::Extent, splits::Splits},
     math::bounds::UBounds3,
 };
 
-/// Skips over nodes that lie outside of `target`.
-pub fn within<T: HexDivNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
-    move |node| Enter::within(node.bounds(), node.node().get().splits(), target)
+pub fn within<T: HexDivNode>(
+    target: UBounds3,
+    enter_target: bool,
+) -> impl Fn(VisitNode<T>) -> Enter {
+    move |node| node.enter_within(target, enter_target)
 }
 
-/// Skips over nodes that lie outside or inside `target`.
 pub fn until<T: HexDivNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter {
-    move |node| Enter::until(node.bounds(), node.node().get().splits(), target)
+    within(target, false)
 }
 
 #[derive(Educe)]
@@ -34,6 +34,16 @@ impl<'a, T: HexDivNode> VisitNode<'a, T> {
     pub fn node(self) -> ParentNodeRef<'a, T> {
         self.node
     }
+
+    pub fn enter_within(self, target: UBounds3, enter_target: bool) -> Enter {
+        let bounds = self.bounds.to_ubounds3();
+        let node = self.node;
+        Enter::within(bounds, node.extent(), node.splits(), target, enter_target)
+    }
+
+    pub fn enter_until(self, target: UBounds3) -> Enter {
+        self.enter_within(target, false)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -47,15 +57,31 @@ pub enum Enter {
 }
 
 impl Enter {
-    fn within(bounds: Bounds, splits: Splits, target: UBounds3) -> Self {
-        if target.upper().cmpeq(UVec3::splat(0)).any() || bounds.to_ubounds3().is_disjoint(target) {
+    /// Constructs an [`Enter`] that skips over nodes outside of `target`.
+    ///
+    /// - `bounds` is the (possibly clamped) bounds of the node
+    /// - `node_extent` is the full `extent` of the node
+    /// - `splits` is the number of splits of the node
+    /// - `enter_target` indicates whether `target` and its children should also be entered
+    pub fn within(
+        bounds: UBounds3,
+        node_extent: Extent,
+        splits: Splits,
+        target: UBounds3,
+        enter_target: bool,
+    ) -> Self {
+        if !enter_target && target.encloses(bounds) {
             return Self::None;
         }
 
-        let child_extent = bounds.extent().split(splits);
+        if target.is_empty() || bounds.is_disjoint(target) {
+            return Self::None;
+        }
 
-        let child_bounds = Bounds::new_floored(target.lower(), child_extent);
-        let upper_bounds_min = Bounds::floor_min_to_extent(target.upper() - 1, child_extent);
+        let child_extent = node_extent.split(splits);
+
+        let child_bounds = Bounds::with_extent_at(child_extent, target.lower());
+        let upper_bounds_min = Bounds::min_with_extent_at(child_extent, target.upper() - 1);
         if child_bounds.min() != upper_bounds_min {
             return Self::All;
         }
@@ -63,13 +89,5 @@ impl Enter {
         Self::Only {
             child: child_bounds.child_index(splits),
         }
-    }
-
-    fn until(bounds: Bounds, splits: Splits, target: UBounds3) -> Self {
-        if target.encloses(bounds.to_ubounds3()) {
-            return Self::None;
-        }
-
-        Self::within(bounds, splits, target)
     }
 }

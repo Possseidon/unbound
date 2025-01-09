@@ -6,11 +6,13 @@ use educe::Educe;
 use super::HexDivNode;
 use crate::hex_div::{
     bounds::Bounds,
-    extent::{Extent, SplitList, Splits},
+    extent::Extent,
+    splits::{SplitList, Splits},
 };
 
 /// Allows building a [`HexDivNode`] incrementally or from a callback.
-#[derive(Clone, Debug)]
+#[derive(Educe)]
+#[educe(Clone, Debug)]
 pub struct Builder<T: HexDivNode> {
     /// The bounds that will be processed by the next call to [`Self::step`].
     bounds: Bounds,
@@ -23,16 +25,16 @@ pub struct Builder<T: HexDivNode> {
 }
 
 impl<T: HexDivNode> Builder<T> {
-    /// Constructs a new [`Builder`] that can build [`HexDivNode`]s with the given `extent`.
+    /// Constructs a [`Builder`] that can build [`T`](HexDivNode)s with the given `extent`.
     pub fn new(extent: Extent) -> Self {
         Self::with_scratch(extent, Default::default())
     }
 
-    /// Constructs a new [`Builder`] that reuses the given [`Scratch`] allocations.
+    /// Constructs a [`Builder`] that reuses the given [`Scratch`] allocations.
     pub fn with_scratch(extent: Extent, scratch: Scratch<T>) -> Self {
         Self {
-            bounds: extent.into(),
-            split_list: extent.to_split_list(),
+            bounds: Bounds::with_extent_at_origin(extent),
+            split_list: SplitList::new(extent),
             nodes: scratch.nodes,
             parents: ArrayVec::new(),
         }
@@ -58,7 +60,6 @@ impl<T: HexDivNode> Builder<T> {
     /// Panics for invalid [`BuildAction`]s; see [`Self::step`].
     pub fn build(&mut self, mut build: impl FnMut(Bounds) -> BuildAction<T>) -> T
     where
-        T: Clone,
         T::Leaf: Clone + Eq,
     {
         loop {
@@ -81,7 +82,6 @@ impl<T: HexDivNode> Builder<T> {
     /// [`BuildAction::Split`] if [`Self::bounds`] covers a single point which cannot be split.
     pub fn step(&mut self, action: BuildAction<T>) -> Option<T>
     where
-        T: Clone,
         T::Leaf: Clone + Eq,
     {
         match action {
@@ -99,7 +99,6 @@ impl<T: HexDivNode> Builder<T> {
     /// Unlike [`Self::node_step`] this can never panic, since the extent is assigned automatically.
     pub fn leaf_step(&mut self, leaf: T::Leaf) -> Option<T>
     where
-        T: Clone,
         T::Leaf: Clone + Eq,
     {
         self.node_step(T::new(self.bounds.extent(), leaf))
@@ -115,7 +114,6 @@ impl<T: HexDivNode> Builder<T> {
     /// Panics if the given `node` has a mismatched extent.
     pub fn node_step(&mut self, mut node: T) -> Option<T>
     where
-        T: Clone,
         T::Leaf: Clone + Eq,
     {
         let extent = self.bounds.extent();
@@ -135,7 +133,7 @@ impl<T: HexDivNode> Builder<T> {
             }
 
             let parent_extent = self.bounds.extent().unsplit(splits);
-            self.bounds = self.bounds.floor_to_extent(parent_extent);
+            self.bounds = self.bounds.resize(parent_extent);
 
             let first_child = self.nodes.len() - (usize::from(splits.volume() - 1));
             let children = self.nodes.drain(first_child..).chain([node]);
@@ -200,7 +198,7 @@ pub struct Scratch<T> {
 }
 
 impl<T> std::fmt::Debug for Scratch<T> {
-    /// Prints the capacity of [`Self::nodes`] rather than its content.
+    /// Prints the capacity rather than the content.
     ///
     /// The contents should always be empty, so that's not useful for debugging.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -231,9 +229,7 @@ const fn scratch_node_capacity_for(extent: Extent) -> usize {
 ///
 /// Purely uses integer maths, so the output for any given `splits` is fully deterministic.
 #[cfg(test)]
-pub(super) fn build_sphere_octant<T: HexDivNode<Leaf = bool, Parent = ()> + Clone>(
-    splits: u8,
-) -> T {
+pub(super) fn build_sphere_octant<T: HexDivNode<Leaf = bool, Parent = ()>>(splits: u8) -> T {
     let extent = Extent::from_splits([splits; 3]).unwrap();
     let max_distance = 1 << splits;
     let max_distance_squared = max_distance * max_distance;
@@ -318,7 +314,7 @@ mod tests {
         assert!(scratch.nodes.capacity() > TOO_SMALL_CAPACITY);
     }
 
-    /// Builds an octree that only contains a single `true` at [`Bounds::MAX_POINT`].
+    /// Builds a [`BitNode`] that only contains a single `true` at [`Bounds::MAX_POINT`].
     ///
     /// This has the effect of requiring the maximum possible amount of capacity inside `scratch`.
     fn build_with_max_capacity(extent: Extent, scratch: Scratch<BitNode>) -> Scratch<BitNode> {

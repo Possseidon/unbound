@@ -10,7 +10,8 @@ use super::{iter::Iter, HexDivNode, NodeDataRef, NodeRef};
 use crate::hex_div::{
     bounds::Bounds,
     cache::{Cache, CacheIn},
-    extent::{Extent, Splits},
+    extent::Extent,
+    splits::Splits,
 };
 
 /// A compact representation of a [`HexDivNode`] storing [`bool`]s.

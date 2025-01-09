@@ -5,6 +5,7 @@ pub mod visit;
 
 use std::{
     iter::{once, repeat_n},
+    ops::Deref,
     sync::Arc,
 };
 
@@ -16,14 +17,14 @@ use itertools::zip_eq;
 use super::{
     bounds::Bounds,
     cache::{Cache, CacheIn},
-    extent::{Extent, Splits},
+    extent::Extent,
+    splits::Splits,
 };
 
 /// A node within an octree, either holding a leaf with a value of type `T` or more [`Node`]s.
 ///
 /// Unlike with regular octrees, nodes don't always split into a `2x2x2` of other nodes. Instead,
-/// nodes can have any cuboid shape as long as it can be split up to
-/// [`OctreeSplits::MAX_TOTAL`](super::extent::OctreeSplits::MAX_TOTAL) times.
+/// nodes can have any cuboid shape as long as it can be split up to [`Splits::MAX_TOTAL`] times.
 ///
 /// # Variants
 ///
@@ -305,10 +306,10 @@ struct ParentNode<T, const N: usize, P, C> {
 ///
 /// # Trait Implementations
 ///
-/// The [`node`] submodule contains implementors of this trait:
+/// This module also contains implementors of this trait:
 ///
-/// - [`node::Node`] as a general purpose implementation that works for all types
-/// - [`node::bool::BitNode`] which is limited to [`bool`], but has very efficient storage
+/// - [`Node`] as a general purpose implementation that works for all types
+/// - [`bool::BitNode`] which is limited to [`prim@bool`], but has very efficient storage
 ///
 /// Since a [`HexDivNode`] is usually made up of a lot of nodes, the concrete node type should
 /// generally strive for a small footprint; two pointers ideally.
@@ -328,13 +329,20 @@ struct ParentNode<T, const N: usize, P, C> {
 ///
 /// # Parent Nodes
 ///
-/// Parent nodes can hold arbitrary additional data of type [`HexDivNode::Parent`].
+/// Parent nodes can hold arbitrary additional data of type [`HexDivNode::Parent`]. Note, that
+/// parent nodes, including this parent data, will be removed automatically if all of their children
+/// contain the same value. If your use-case requires parent data to influence the [`HexDivNode`]
+/// structure, it should probably be [`HexDivNode::Leaf`] data in a separate [`HexDivNode`] instead.
 ///
-/// TODO: Use cases?
+/// This [`HexDivNode::Parent`] data can be used to e.g. cache arbitrary things that, unlike
+/// [`HexDivNode::Cache`], are not just an aggregation of its own [`HexDivNode::Leaf`] data. Again,
+/// keep in mind though, that it will disappear if the parent node is merged into a single leaf.
 ///
-/// Additionally, parent nodes can also hold an immutable cached value of type
-/// [`HexDivNode::Cache`], which is automatically derived from its children. E.g.
-/// [`node::bool::NodeWithCount`] caches the total number of `true` leaves in its parent nodes.
+/// # [`Cache`]
+///
+/// Parent nodes can hold an immutable cached value of type [`HexDivNode::Cache`], which is
+/// automatically derived from its children. E.g. [`Count`](bool::Count) caches the total number of
+/// `true` leaves across all children.
 ///
 /// [Octree]: https://en.wikipedia.org/wiki/Octree
 /// [Quadtree]: https://en.wikipedia.org/wiki/Quadtree
@@ -349,8 +357,8 @@ pub trait HexDivNode: Sized {
 
     /// A reference to a [`HexDivNode::Leaf`], usually just `&Self::Leaf`.
     ///
-    /// The main use-case for this customization point is to avoid having to hand to `&bool`, which
-    /// is impossible if [`bool`] leaves are stored as bits in e.g. a [`u64`].
+    /// The main use-case for this customization point is to avoid having to hand out `&bool`, which
+    /// is impossible if [`prim@bool`] leaves are stored as bits in e.g. a [`u64`].
     type LeafRef<'a>: Copy
     where
         Self::Leaf: 'a;
@@ -368,10 +376,10 @@ pub trait HexDivNode: Sized {
     where
         Self::Leaf: 'a;
 
-    /// Constructs a new instance of the specified `extent` filled with the given `leaf`.
+    /// Constructs a [`HexDivNode`] of the specified `extent` filled with the given `leaf`.
     fn new(extent: Extent, leaf: Self::Leaf) -> Self;
 
-    /// Construtcs a new instance of the specified `extent` filled with the [`Default`] leaf value.
+    /// Construtcs a [`HexDivNode`] of the specified `extent` filled with the [`Default`] leaf.
     fn with_default(extent: Extent) -> Self
     where
         Self::Leaf: Default,
@@ -392,7 +400,6 @@ pub trait HexDivNode: Sized {
         parent: Self::Parent,
     ) -> Self
     where
-        Self: Clone,
         Self::Leaf: Clone + Eq,
     {
         let first = children.next().expect("children should not be empty");
@@ -443,7 +450,8 @@ pub trait HexDivNode: Sized {
                             return Self::from_nodes_unchecked(
                                 extent,
                                 splits,
-                                repeat_n(Self::new(child_extent, first), already_processed.into())
+                                repeat_n(first, already_processed.into())
+                                    .map(|leaf| Self::new(child_extent, leaf))
                                     .chain([child])
                                     .chain(children.map(|(_, child)| child))
                                     .collect(),
@@ -503,7 +511,7 @@ pub trait HexDivNode: Sized {
     /// Returns a reference to the underlying data of this node.
     ///
     /// - For leaf nodes: [`HexDivNode::LeafRef`]
-    /// - For parent nodes: [`&HexDiv::Parent`](HexDiv::Parent), [`Cache::Ref`]
+    /// - For parent nodes: [`&HexDivNode::Parent`](HexDivNode::Parent), [`Cache::Ref`]
     fn as_data(&self) -> NodeDataRef<Self>;
 
     /// Unwraps a leaf node into [`HexDivNode::Leaf`].
@@ -602,9 +610,13 @@ impl<'a, T: HexDivNode> ParentNodeRef<'a, T> {
     pub fn new(node: &'a T) -> Option<Self> {
         node.as_data().is_parent().then_some(Self(node))
     }
+}
 
-    pub fn get(self) -> &'a T {
-        self.0
+impl<'a, T> Deref for ParentNodeRef<'a, T> {
+    type Target = &'a T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

@@ -8,7 +8,7 @@ use super::{
 };
 use crate::hex_div::{
     bounds::Bounds,
-    extent::{SplitList, Splits},
+    splits::{SplitList, Splits},
 };
 
 /// An iterator that iterates over the nodes of a [`HexDivNode`].
@@ -116,7 +116,7 @@ pub struct Iter<'a, T> {
 impl<'a, T: HexDivNode> Iter<'a, T> {
     pub(super) fn new(root: &'a T) -> Self {
         Self {
-            bounds: root.extent().into(),
+            bounds: Bounds::with_extent_at_origin(root.extent()),
             root: Some(root),
             parents: ArrayVec::new(),
             enter_only: BitArray::default(),
@@ -146,11 +146,11 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
         let Some(parent) = self.parents.last() else {
             self.panic_skip_or_enter();
         };
-        assert!(self.bounds.extent() == parent.get().extent());
+        assert!(self.bounds.extent() == parent.extent());
         self.parents.pop();
 
         if let Some(parent) = self.parents.last() {
-            let splits = parent.get().splits();
+            let splits = parent.splits();
             let index = self.bounds.child_index(splits);
             self.next_neighbor(index, splits);
         }
@@ -170,7 +170,6 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
         let Some(parent) = self.parents.last() else {
             self.panic_skip_or_enter();
         };
-        let parent = parent.get();
         assert!(self.bounds.extent() == parent.extent());
         let splits = parent.splits();
         self.bounds = self
@@ -202,7 +201,7 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
 
     /// Advances the iterator, assuming [`Self::root`] is empty.
     fn advance(&mut self) -> Option<(Bounds, NodeRef<'a, T>)> {
-        let parent = self.parents.last()?.get();
+        let parent = *self.parents.last()?;
         let splits = parent.splits();
 
         let (bounds, index, child) = if self.bounds.extent() == parent.extent() {
@@ -244,14 +243,14 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
                 }
             }
 
-            self.bounds.unsplit_unchecked(splits);
+            self.bounds = self.bounds.unsplit_first_child_unchecked(splits);
             self.parents.pop();
 
             let Some(parent) = self.parents.last() else {
                 break;
             };
 
-            splits = parent.get().splits();
+            splits = parent.splits();
             index = self.bounds.child_index(splits);
         }
     }
@@ -336,14 +335,14 @@ mod tests {
 
         let nodes = root.iter().visit(|_| Enter::None);
 
-        let bounds = root.extent().into();
+        let bounds = Bounds::with_extent_at_origin(root.extent());
         assert_equal(nodes, [(bounds, NodeRef::Node(&root))]);
     }
 
     #[test]
     fn visit_only_yields_specific_nodes() {
         let root = build_sphere_octant::<BitNode<(), Count>>(6);
-        let bounds = Bounds::from(root.extent());
+        let bounds = Bounds::with_extent_at_origin(root.extent());
         let splits = root.splits();
 
         let nodes = root.iter().visit(|_| Enter::Only { child: 0 });
