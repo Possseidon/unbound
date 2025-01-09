@@ -200,7 +200,7 @@ struct ParentNode<const N: usize, P, C> {
     /// Skipped by [`Hash`], since the same `children` always lead to the same cached value.
     ///
     /// On the other hand, it makes a lot of sense for [`Eq`] to make use of it, since it has the
-    /// potential to very quickly short-circuit the comparison of large octrees.
+    /// potential to very quickly short-circuit the comparison of large [`BitNode`]s.
     cache: C,
     children: [BitNode<P, C>; N],
     parent: P,
@@ -264,6 +264,11 @@ impl FromIterator<bool> for LeavesBuilder {
 
 /// An extension on top of [`Cache`] for [`BitNode`].
 pub trait BitCache: for<'a> Cache<bool, Ref<'a> = Self> + Copy {
+    /// Computes the cache from the internal representation.
+    ///
+    /// This way it can take advantage of things like [`u64::count_ones`].
+    ///
+    /// For nodes with less than `64` children, MSBs are padded with `0`.
     fn compute_cache_from_bits(bits: u64) -> Self;
 }
 
