@@ -20,6 +20,23 @@ use crate::hex_div::{
 #[educe(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct BitNode<P = (), C = NoBitCache>(Repr<P, C>);
 
+impl<P, C: BitCache> BitNode<P, C> {
+    /// Whether none of the bits are set.
+    pub fn none(&self) -> bool {
+        matches!(self.as_data(), NodeDataRef::Leaf(false))
+    }
+
+    /// Whether all bits are set.
+    pub fn all(&self) -> bool {
+        matches!(self.as_data(), NodeDataRef::Leaf(true))
+    }
+
+    /// Whether at least one bit is set.
+    pub fn any(&self) -> bool {
+        !self.none()
+    }
+}
+
 impl<P, C: BitCache> HexDivNode for BitNode<P, C> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
