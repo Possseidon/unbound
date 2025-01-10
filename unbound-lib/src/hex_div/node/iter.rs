@@ -254,7 +254,7 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
     }
 }
 
-impl<'a, T> Clone for Iter<'a, T> {
+impl<T> Clone for Iter<'_, T> {
     fn clone(&self) -> Self {
         Self {
             bounds: self.bounds,
@@ -265,7 +265,7 @@ impl<'a, T> Clone for Iter<'a, T> {
     }
 }
 
-impl<'a, T> Default for Iter<'a, T> {
+impl<T> Default for Iter<'_, T> {
     fn default() -> Self {
         Self {
             bounds: Default::default(),

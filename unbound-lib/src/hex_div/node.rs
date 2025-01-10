@@ -775,13 +775,13 @@ impl<'a, T: HexDivNode> NodeRef<'a, T> {
     }
 }
 
-impl<'a, T: HexDivNode> Clone for NodeRef<'a, T> {
+impl<T: HexDivNode> Clone for NodeRef<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T: HexDivNode> Copy for NodeRef<'a, T> {}
+impl<T: HexDivNode> Copy for NodeRef<'_, T> {}
 
 /// A reference to a [`HexDivNode`] node that is known to have children.
 #[derive(Debug, Hash, PartialEq, Eq)]
@@ -793,13 +793,13 @@ impl<'a, T: HexDivNode> ParentNodeRef<'a, T> {
     }
 }
 
-impl<'a, T> Clone for ParentNodeRef<'a, T> {
+impl<T> Clone for ParentNodeRef<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T> Copy for ParentNodeRef<'a, T> {}
+impl<T> Copy for ParentNodeRef<'_, T> {}
 
 impl<'a, T> Deref for ParentNodeRef<'a, T> {
     type Target = &'a T;

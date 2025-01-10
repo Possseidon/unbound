@@ -87,13 +87,13 @@ pub enum HexDivNodeRef<'a, T: HexDivNode> {
     Leaf(T::LeafRef<'a>),
 }
 
-impl<'a, T: HexDivNode> Clone for HexDivNodeRef<'a, T> {
+impl<T: HexDivNode> Clone for HexDivNodeRef<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T: HexDivNode> Copy for HexDivNodeRef<'a, T> {}
+impl<T: HexDivNode> Copy for HexDivNodeRef<'_, T> {}
 
 #[derive(Debug)]
 pub struct HexDivRef<'a, T> {
@@ -101,19 +101,19 @@ pub struct HexDivRef<'a, T> {
     root: &'a T,
 }
 
-impl<'a, T: HexDivNode> HexDivRef<'a, T> {
+impl<T: HexDivNode> HexDivRef<'_, T> {
     pub fn iter(&self) -> Iter<T> {
         Iter::new(self.bounds, self.root)
     }
 }
 
-impl<'a, T> Clone for HexDivRef<'a, T> {
+impl<T> Clone for HexDivRef<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T> Copy for HexDivRef<'a, T> {}
+impl<T> Copy for HexDivRef<'_, T> {}
 
 /// A [`HexDivRef`] that is known to have children.
 #[derive(Debug)]
@@ -125,13 +125,13 @@ impl<'a, T: HexDivNode> ParentHexDivRef<'a, T> {
     }
 }
 
-impl<'a, T> Clone for ParentHexDivRef<'a, T> {
+impl<T> Clone for ParentHexDivRef<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T> Copy for ParentHexDivRef<'a, T> {}
+impl<T> Copy for ParentHexDivRef<'_, T> {}
 
 impl<'a, T> Deref for ParentHexDivRef<'a, T> {
     type Target = HexDivRef<'a, T>;

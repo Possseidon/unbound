@@ -49,10 +49,10 @@ impl<'a, T: HexDivNode> VisitNode<'a, T> {
     }
 }
 
-impl<'a, T> Clone for VisitNode<'a, T> {
+impl<T> Clone for VisitNode<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T> Copy for VisitNode<'a, T> {}
+impl<T> Copy for VisitNode<'_, T> {}
