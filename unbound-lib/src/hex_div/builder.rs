@@ -1,4 +1,5 @@
-use educe::Educe;
+use std::fmt;
+
 use glam::UVec3;
 
 use super::{
@@ -13,11 +14,33 @@ use super::{
 use crate::math::bounds::UBounds3;
 
 /// Allows building a [`HexDiv`] incrementally or from a callback.
-#[derive(Educe)]
-#[educe(Clone, Debug)]
 pub struct Builder<T: HexDivNode> {
     bounds: UBounds3,
     inner: NodeBuilder<T>,
+}
+
+impl<T: HexDivNode> Clone for Builder<T>
+where
+    NodeBuilder<T>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            bounds: self.bounds,
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T: HexDivNode> fmt::Debug for Builder<T>
+where
+    NodeBuilder<T>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Builder")
+            .field("bounds", &self.bounds)
+            .field("inner", &self.inner)
+            .finish()
+    }
 }
 
 impl<T: HexDivNode> Builder<T> {

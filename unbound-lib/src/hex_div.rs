@@ -9,7 +9,6 @@ pub mod visit;
 
 use std::{fmt, ops::Deref};
 
-use educe::Educe;
 use extent::Extent;
 use glam::UVec3;
 use iter::Iter;
@@ -82,15 +81,21 @@ where
 }
 
 /// References a node within a [`HexDiv`].
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub enum HexDivNodeRef<'a, T: HexDivNode> {
     Node(HexDivRef<'a, T>),
     Leaf(T::LeafRef<'a>),
 }
 
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug)]
+impl<'a, T: HexDivNode> Clone for HexDivNodeRef<'a, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, T: HexDivNode> Copy for HexDivNodeRef<'a, T> {}
+
+#[derive(Debug)]
 pub struct HexDivRef<'a, T> {
     bounds: UBounds3,
     root: &'a T,
@@ -102,9 +107,16 @@ impl<'a, T: HexDivNode> HexDivRef<'a, T> {
     }
 }
 
+impl<'a, T> Clone for HexDivRef<'a, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, T> Copy for HexDivRef<'a, T> {}
+
 /// A [`HexDivRef`] that is known to have children.
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct ParentHexDivRef<'a, T>(HexDivRef<'a, T>);
 
 impl<'a, T: HexDivNode> ParentHexDivRef<'a, T> {
@@ -112,6 +124,14 @@ impl<'a, T: HexDivNode> ParentHexDivRef<'a, T> {
         hex_div.root.as_data().is_parent().then_some(Self(hex_div))
     }
 }
+
+impl<'a, T> Clone for ParentHexDivRef<'a, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, T> Copy for ParentHexDivRef<'a, T> {}
 
 impl<'a, T> Deref for ParentHexDivRef<'a, T> {
     type Target = HexDivRef<'a, T>;

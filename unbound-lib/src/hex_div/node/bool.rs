@@ -1,10 +1,10 @@
 use std::{
     hash::{Hash, Hasher},
+    mem::discriminant,
     sync::Arc,
 };
 
 use arrayvec::ArrayVec;
-use educe::Educe;
 
 use super::{iter::Iter, HexDivNode, NodeDataRef, NodeRef};
 use crate::hex_div::{
@@ -17,11 +17,18 @@ use crate::hex_div::{
 /// A compact representation of a [`HexDivNode`] storing [`bool`]s.
 ///
 /// The final leaves nodes are stored as `u64` rather than `[bool; 64]`.
-#[derive(Educe)]
-#[educe(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct BitNode<P = (), C = NoBitCache>(Repr<P, C>);
+///
+/// [`BitNode`] does not support [`HexDivNode::Parent`] data, since it would require storing `u64`
+/// along with it in an [`Arc`] to keep the size of [`BitNode`] small and independent of the
+/// [`HexDivNode::Parent`] data. If the need arises, a separate type would need to be implemented
+/// that does store them together in an [`Arc`].
+///
+/// The same caveats regarding [`Eq`] and [`Hash`] as for [`Node`](super::Node) apply, although it's
+/// less relevant due to [`BitNode`] requiring its [`Cache`] to be [`Copy`].
+#[derive(Debug, PartialEq, Eq)]
+pub struct BitNode<C = NoBitCache>(Repr<C>);
 
-impl<P, C: BitCache> BitNode<P, C> {
+impl<C: BitCache> BitNode<C> {
     /// Whether none of the bits are set.
     pub fn none(&self) -> bool {
         matches!(self.as_data(), NodeDataRef::Leaf(false))
@@ -38,12 +45,33 @@ impl<P, C: BitCache> BitNode<P, C> {
     }
 }
 
-impl<P, C: BitCache> HexDivNode for BitNode<P, C> {
+impl<C> Clone for BitNode<C> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<C> Hash for BitNode<C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<'a, C: BitCache> IntoIterator for &'a BitNode<C> {
+    type Item = (Bounds, NodeRef<'a, BitNode<C>>);
+    type IntoIter = Iter<'a, BitNode<C>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<C: BitCache> HexDivNode for BitNode<C> {
     type Leaf = bool;
     type LeafRef<'a> = bool;
     type LeavesBuilder = LeavesBuilder;
 
-    type Parent = P;
+    type Parent = ();
 
     type Cache<'a> = C;
 
@@ -55,28 +83,24 @@ impl<P, C: BitCache> HexDivNode for BitNode<P, C> {
         extent: Extent,
         splits: Splits,
         leaves: Self::LeavesBuilder,
-        parent: Self::Parent,
+        _: Self::Parent,
     ) -> Self {
-        Self(Repr::Leaves(
-            extent,
-            splits,
-            Arc::new((leaves.leaves, parent)),
-        ))
+        Self(Repr::Leaves(extent, splits, leaves.leaves))
     }
 
     fn from_nodes_unchecked(
         extent: Extent,
         splits: Splits,
         nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
-        parent: Self::Parent,
+        _: Self::Parent,
     ) -> Self {
         Self(match splits.total() {
-            1 => Repr::from_nodes(Repr::Parent1, extent, splits, nodes, parent),
-            2 => Repr::from_nodes(Repr::Parent2, extent, splits, nodes, parent),
-            3 => Repr::from_nodes(Repr::Parent3, extent, splits, nodes, parent),
-            4 => Repr::from_nodes(Repr::Parent4, extent, splits, nodes, parent),
-            5 => Repr::from_nodes(Repr::Parent5, extent, splits, nodes, parent),
-            6 => Repr::from_nodes(Repr::Parent6, extent, splits, nodes, parent),
+            1 => Repr::from_nodes(Repr::Parent1, extent, splits, nodes),
+            2 => Repr::from_nodes(Repr::Parent2, extent, splits, nodes),
+            3 => Repr::from_nodes(Repr::Parent3, extent, splits, nodes),
+            4 => Repr::from_nodes(Repr::Parent4, extent, splits, nodes),
+            5 => Repr::from_nodes(Repr::Parent5, extent, splits, nodes),
+            6 => Repr::from_nodes(Repr::Parent6, extent, splits, nodes),
             _ => panic!("invalid number of splits"),
         })
     }
@@ -111,15 +135,14 @@ impl<P, C: BitCache> HexDivNode for BitNode<P, C> {
         match &self.0 {
             Repr::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
             Repr::Leaves(_, _, leaves) => {
-                let (bits, parent) = &**leaves;
-                NodeDataRef::Parent(parent, C::compute_cache_from_bits(*bits))
+                NodeDataRef::Parent(&(), C::compute_cache_from_bits(*leaves))
             }
-            Repr::Parent1(_, _, node) => NodeDataRef::Parent(&node.parent, node.cache),
-            Repr::Parent2(_, _, node) => NodeDataRef::Parent(&node.parent, node.cache),
-            Repr::Parent3(_, _, node) => NodeDataRef::Parent(&node.parent, node.cache),
-            Repr::Parent4(_, _, node) => NodeDataRef::Parent(&node.parent, node.cache),
-            Repr::Parent5(_, _, node) => NodeDataRef::Parent(&node.parent, node.cache),
-            Repr::Parent6(_, _, node) => NodeDataRef::Parent(&node.parent, node.cache),
+            Repr::Parent1(_, _, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent2(_, _, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent3(_, _, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent4(_, _, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent5(_, _, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent6(_, _, node) => NodeDataRef::Parent(&(), node.cache),
         }
     }
 
@@ -135,7 +158,7 @@ impl<P, C: BitCache> HexDivNode for BitNode<P, C> {
         let index = usize::from(index);
         match &self.0 {
             Repr::Leaf(_, _) => panic!("leaf nodes have no children"),
-            Repr::Leaves(_, _, leaves) => NodeRef::Leaf(1 << index & leaves.0 != 0),
+            Repr::Leaves(_, _, leaves) => NodeRef::Leaf(1 << index & leaves != 0),
             Repr::Parent1(_, _, node) => NodeRef::Node(&node.children[index]),
             Repr::Parent2(_, _, node) => NodeRef::Node(&node.children[index]),
             Repr::Parent3(_, _, node) => NodeRef::Node(&node.children[index]),
@@ -146,37 +169,26 @@ impl<P, C: BitCache> HexDivNode for BitNode<P, C> {
     }
 }
 
-impl<'a, P> IntoIterator for &'a BitNode<P> {
-    type Item = (Bounds, NodeRef<'a, BitNode<P>>);
-    type IntoIter = Iter<'a, BitNode<P>>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-#[derive(Educe)]
-#[educe(Clone, Debug, Hash, PartialEq, Eq)]
-enum Repr<P, C> {
+#[derive(Debug, PartialEq, Eq)]
+enum Repr<C> {
     Leaf(Extent, bool),
-    Leaves(Extent, Splits, Arc<(u64, P)>),
-    Parent1(Extent, Splits, Arc<ParentNode<2, P, C>>),
-    Parent2(Extent, Splits, Arc<ParentNode<4, P, C>>),
-    Parent3(Extent, Splits, Arc<ParentNode<8, P, C>>),
-    Parent4(Extent, Splits, Arc<ParentNode<16, P, C>>),
-    Parent5(Extent, Splits, Arc<ParentNode<32, P, C>>),
-    Parent6(Extent, Splits, Arc<ParentNode<64, P, C>>),
+    Leaves(Extent, Splits, u64),
+    Parent1(Extent, Splits, Arc<ParentNode<2, C>>),
+    Parent2(Extent, Splits, Arc<ParentNode<4, C>>),
+    Parent3(Extent, Splits, Arc<ParentNode<8, C>>),
+    Parent4(Extent, Splits, Arc<ParentNode<16, C>>),
+    Parent5(Extent, Splits, Arc<ParentNode<32, C>>),
+    Parent6(Extent, Splits, Arc<ParentNode<64, C>>),
 }
 
-type NewRepr<const N: usize, P, C> = fn(Extent, Splits, Arc<ParentNode<N, P, C>>) -> Repr<P, C>;
+type NewRepr<const N: usize, C> = fn(Extent, Splits, Arc<ParentNode<N, C>>) -> Repr<C>;
 
-impl<P, C: BitCache> Repr<P, C> {
+impl<C: BitCache> Repr<C> {
     fn from_nodes<const N: usize>(
-        new: NewRepr<N, P, C>,
+        new: NewRepr<N, C>,
         extent: Extent,
         splits: Splits,
-        nodes: ArrayVec<BitNode<P, C>, { Splits::MAX_VOLUME_USIZE }>,
-        parent: P,
+        nodes: ArrayVec<BitNode<C>, { Splits::MAX_VOLUME_USIZE }>,
     ) -> Self {
         let children = array_init::from_iter(nodes).expect("leaves should have correct length");
         new(
@@ -188,14 +200,75 @@ impl<P, C: BitCache> Repr<P, C> {
                     children.iter().map(CacheIn::from_node),
                 ),
                 children,
-                parent,
             }),
         )
     }
 }
 
+impl<C> Clone for Repr<C> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Leaf(extent, leaf) => Self::Leaf(*extent, *leaf),
+            Self::Leaves(extent, splits, leaves) => Self::Leaves(*extent, *splits, *leaves),
+            Self::Parent1(extent, splits, node) => Self::Parent1(*extent, *splits, node.clone()),
+            Self::Parent2(extent, splits, node) => Self::Parent2(*extent, *splits, node.clone()),
+            Self::Parent3(extent, splits, node) => Self::Parent3(*extent, *splits, node.clone()),
+            Self::Parent4(extent, splits, node) => Self::Parent4(*extent, *splits, node.clone()),
+            Self::Parent5(extent, splits, node) => Self::Parent5(*extent, *splits, node.clone()),
+            Self::Parent6(extent, splits, node) => Self::Parent6(*extent, *splits, node.clone()),
+        }
+    }
+}
+
+impl<C> Hash for Repr<C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        discriminant(self).hash(state);
+        match self {
+            Self::Leaf(extent, leaf) => {
+                extent.hash(state);
+                leaf.hash(state);
+            }
+            Self::Leaves(extent, splits, leaves) => {
+                extent.hash(state);
+                splits.hash(state);
+                leaves.hash(state);
+            }
+            Self::Parent1(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent2(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent3(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent4(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent5(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent6(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ParentNode<const N: usize, P, C> {
+struct ParentNode<const N: usize, C> {
     /// The cached value for this node.
     ///
     /// Skipped by [`Hash`], since the same `children` always lead to the same cached value.
@@ -203,15 +276,13 @@ struct ParentNode<const N: usize, P, C> {
     /// On the other hand, it makes a lot of sense for [`Eq`] to make use of it, since it has the
     /// potential to very quickly short-circuit the comparison of large [`BitNode`]s.
     cache: C,
-    children: [BitNode<P, C>; N],
-    parent: P,
+    children: [BitNode<C>; N],
 }
 
-impl<const N: usize, P: Hash, C> Hash for ParentNode<N, P, C> {
+impl<const N: usize, C> Hash for ParentNode<N, C> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // count intentionally skipped
+        // intentionally ignore cache
         self.children.hash(state);
-        self.parent.hash(state);
     }
 }
 
@@ -264,12 +335,14 @@ impl FromIterator<bool> for LeavesBuilder {
 }
 
 /// An extension on top of [`Cache`] for [`BitNode`].
+///
+/// Used to both simplify and optimize [`BitNode`]'s cache computation for its [`u64`] leaves.
 pub trait BitCache: for<'a> Cache<bool, Ref<'a> = Self> + Copy {
-    /// Computes the cache from the internal representation.
+    /// Computes the cache from [`BitNode`]'s internal leaves representation: [`u64`].
     ///
     /// This way it can take advantage of things like [`u64::count_ones`].
     ///
-    /// For nodes with less than `64` children, MSBs are padded with `0`.
+    /// For nodes with less than `64` leaves, [`BitNode`] guarantees the MSBs to be padded with `0`.
     fn compute_cache_from_bits(bits: u64) -> Self;
 }
 
@@ -291,7 +364,9 @@ impl BitCache for NoBitCache {
     }
 }
 
-/// A [`BitCache`] for [`BitNode`] that caches the total number of `true`.
+/// A [`Cache`] for [`HexDivNode`]s holding `bool`s, caching the total number of `true`.
+///
+/// Works with [`BitNode`], which requires a super trait of [`Cache`], namely [`BitCache`].
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Count(pub u128);
 
