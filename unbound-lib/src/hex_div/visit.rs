@@ -1,4 +1,3 @@
-use educe::Educe;
 use glam::UVec3;
 
 use super::{
@@ -18,8 +17,7 @@ pub fn until<T: HexDivNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter 
     within(target, false)
 }
 
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct VisitNode<'a, T> {
     pub(super) lower: UVec3,
     pub(super) node: ParentHexDivRef<'a, T>,
@@ -50,3 +48,11 @@ impl<'a, T: HexDivNode> VisitNode<'a, T> {
         self.enter_within(target, false)
     }
 }
+
+impl<T> Clone for VisitNode<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for VisitNode<'_, T> {}

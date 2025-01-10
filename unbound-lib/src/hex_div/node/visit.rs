@@ -1,5 +1,3 @@
-use educe::Educe;
-
 use super::{HexDivNode, ParentNodeRef};
 use crate::{
     hex_div::{bounds::Bounds, extent::Extent, splits::Splits},
@@ -17,8 +15,7 @@ pub fn until<T: HexDivNode>(target: UBounds3) -> impl Fn(VisitNode<T>) -> Enter 
     within(target, false)
 }
 
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct VisitNode<'a, T> {
     pub(super) bounds: Bounds,
     pub(super) node: ParentNodeRef<'a, T>,
@@ -45,6 +42,14 @@ impl<'a, T: HexDivNode> VisitNode<'a, T> {
         self.enter_within(target, false)
     }
 }
+
+impl<T> Clone for VisitNode<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for VisitNode<'_, T> {}
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Enter {

@@ -1,7 +1,6 @@
-use std::mem::take;
+use std::{fmt, mem::take};
 
 use arrayvec::ArrayVec;
-use educe::Educe;
 
 use super::HexDivNode;
 use crate::hex_div::{
@@ -11,8 +10,7 @@ use crate::hex_div::{
 };
 
 /// Allows building a [`HexDivNode`] incrementally or from a callback.
-#[derive(Educe)]
-#[educe(Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Builder<T: HexDivNode> {
     /// The bounds that will be processed by the next call to [`Self::step`].
     bounds: Bounds,
@@ -175,6 +173,7 @@ impl<T: HexDivNode> Builder<T> {
 }
 
 /// Used as input to [`Builder::step`] to decide what to build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BuildAction<T: HexDivNode> {
     /// Fills the bounds with the given value.
     ///
@@ -191,21 +190,8 @@ pub enum BuildAction<T: HexDivNode> {
 /// Contained [`Vec`]s are always empty, since they are only used to keep their allocated capacity.
 ///
 /// Intentionally does not implement [`Clone`], since cloning a [`Vec`] does not clone its capacity.
-#[derive(Educe)]
-#[educe(Default)]
 pub struct Scratch<T> {
     nodes: Vec<T>,
-}
-
-impl<T> std::fmt::Debug for Scratch<T> {
-    /// Prints the capacity rather than the content.
-    ///
-    /// The contents should always be empty, so that's not useful for debugging.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Scratch")
-            .field("nodes_capacity", &self.nodes.capacity())
-            .finish()
-    }
 }
 
 impl<T> Scratch<T> {
@@ -213,6 +199,25 @@ impl<T> Scratch<T> {
     pub fn with_capacity_for(extent: Extent) -> Self {
         Self {
             nodes: Vec::with_capacity(scratch_node_capacity_for(extent)),
+        }
+    }
+}
+
+impl<T> fmt::Debug for Scratch<T> {
+    /// Prints the capacity rather than the content.
+    ///
+    /// The contents should always be empty, so that's not useful for debugging.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Scratch")
+            .field("nodes_capacity", &self.nodes.capacity())
+            .finish()
+    }
+}
+
+impl<T> Default for Scratch<T> {
+    fn default() -> Self {
+        Self {
+            nodes: Default::default(),
         }
     }
 }
@@ -257,7 +262,7 @@ mod tests {
 
     #[test]
     fn sphere_octant() {
-        let root = build_sphere_octant::<BitNode<(), Count>>(8);
+        let root = build_sphere_octant::<BitNode<Count>>(8);
 
         let NodeDataRef::Parent(_, Count(volume)) = root.as_data() else {
             panic!("should be a parent node");

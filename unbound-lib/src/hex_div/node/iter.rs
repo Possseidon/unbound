@@ -1,6 +1,5 @@
 use arrayvec::ArrayVec;
 use bitvec::array::BitArray;
-use educe::Educe;
 
 use super::{
     visit::{Enter, VisitNode},
@@ -85,8 +84,7 @@ use crate::hex_div::{
 /// which visits all children, must be used.
 ///
 /// [interior mutability]: https://doc.rust-lang.org/reference/interior-mutability.html
-#[derive(Educe)]
-#[educe(Clone, Default, Debug)]
+#[derive(Debug)]
 pub struct Iter<'a, T> {
     /// Represents the iterator's current position within the [`HexDivNode`].
     ///
@@ -256,6 +254,28 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
     }
 }
 
+impl<T> Clone for Iter<'_, T> {
+    fn clone(&self) -> Self {
+        Self {
+            bounds: self.bounds,
+            root: self.root,
+            parents: self.parents.clone(),
+            enter_only: self.enter_only,
+        }
+    }
+}
+
+impl<T> Default for Iter<'_, T> {
+    fn default() -> Self {
+        Self {
+            bounds: Default::default(),
+            root: Default::default(),
+            parents: Default::default(),
+            enter_only: Default::default(),
+        }
+    }
+}
+
 impl<'a, T: HexDivNode> Iterator for Iter<'a, T> {
     type Item = (Bounds, NodeRef<'a, T>);
 
@@ -341,7 +361,7 @@ mod tests {
 
     #[test]
     fn visit_only_yields_specific_nodes() {
-        let root = build_sphere_octant::<BitNode<(), Count>>(6);
+        let root = build_sphere_octant::<BitNode<Count>>(6);
         let bounds = Bounds::with_extent_at_origin(root.extent());
         let splits = root.splits();
 

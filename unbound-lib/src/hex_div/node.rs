@@ -4,18 +4,19 @@ pub mod iter;
 pub mod visit;
 
 use std::{
+    fmt,
+    hash::{Hash, Hasher},
     iter::{once, repeat_n},
+    mem::discriminant,
     ops::Deref,
     sync::Arc,
 };
 
 use arrayvec::ArrayVec;
-use educe::Educe;
 use iter::Iter;
 use itertools::zip_eq;
 
 use super::{
-    bounds::Bounds,
     cache::{Cache, CacheIn},
     extent::Extent,
     splits::Splits,
@@ -25,6 +26,20 @@ use super::{
 ///
 /// Unlike with regular octrees, nodes don't always split into a `2x2x2` of other nodes. Instead,
 /// nodes can have any cuboid shape as long as it can be split up to [`Splits::MAX_TOTAL`] times.
+///
+/// # [`Eq`] and [`Hash`]
+///
+/// As an optimization, [`PartialEq`]/[`Eq`] first compare the [`Node`]'s [`Cache`], since it is
+/// fully dependent on the leaf data and generally allows for fast short circuiting. This however
+/// requires the [`Cache`] to be [`PartialEq`]/[`Eq`] itself, despite it not strictly being
+/// necessary or always desireable to compare the [`Cache`].
+///
+/// To resolve these two issues, `C` can be wrapped in [`CacheAlwaysEq`], which basically just
+/// disables `C` from being compared (all `C` are not considered equal, no matter their value).
+///
+/// [`Hash`]ing a node on the other hand never hashes its [`Cache`]. The cache itself is already
+/// derived from existing data (the child nodes) so hashing the cache would not add any extra value
+/// to the node's hash.
 ///
 /// # Variants
 ///
@@ -37,8 +52,7 @@ use super::{
 /// adds up) and also improves type-safety.
 ///
 /// Additionally, parent nodes are stored in [`Arc`]s, making clones very cheap.
-#[derive(Educe)]
-#[educe(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Node<T, P = (), C = NoCache>(Repr<T, P, C>);
 
 impl<T, P, C> HexDivNode for Node<T, P, C>
@@ -181,15 +195,15 @@ where
     }
 }
 
-impl<'a, T, P, C> IntoIterator for &'a Node<T, P, C>
-where
-    C: for<'b> Cache<&'b T, Ref<'b> = &'b C>,
-{
-    type Item = (Bounds, NodeRef<'a, Node<T, P, C>>);
-    type IntoIter = Iter<'a, Node<T, P, C>>;
+impl<T: Clone, P, C> Clone for Node<T, P, C> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+impl<T: Hash, P: Hash, C> Hash for Node<T, P, C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
     }
 }
 
@@ -204,8 +218,7 @@ impl<T> Cache<T> for NoCache {
     }
 }
 
-#[derive(Educe)]
-#[educe(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum Repr<T, P, C> {
     Leaf(Extent, T),
     Leaves1(Extent, Splits, Arc<LeavesNode<T, 2, P, C>>),
@@ -276,30 +289,128 @@ where
     }
 }
 
+impl<T: Clone, P, C> Clone for Repr<T, P, C> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Leaf(extent, leaf) => Self::Leaf(*extent, leaf.clone()),
+            Self::Leaves1(extent, splits, node) => Self::Leaves1(*extent, *splits, node.clone()),
+            Self::Leaves2(extent, splits, node) => Self::Leaves2(*extent, *splits, node.clone()),
+            Self::Leaves3(extent, splits, node) => Self::Leaves3(*extent, *splits, node.clone()),
+            Self::Leaves4(extent, splits, node) => Self::Leaves4(*extent, *splits, node.clone()),
+            Self::Leaves5(extent, splits, node) => Self::Leaves5(*extent, *splits, node.clone()),
+            Self::Leaves6(extent, splits, node) => Self::Leaves6(*extent, *splits, node.clone()),
+            Self::Parent1(extent, splits, node) => Self::Parent1(*extent, *splits, node.clone()),
+            Self::Parent2(extent, splits, node) => Self::Parent2(*extent, *splits, node.clone()),
+            Self::Parent3(extent, splits, node) => Self::Parent3(*extent, *splits, node.clone()),
+            Self::Parent4(extent, splits, node) => Self::Parent4(*extent, *splits, node.clone()),
+            Self::Parent5(extent, splits, node) => Self::Parent5(*extent, *splits, node.clone()),
+            Self::Parent6(extent, splits, node) => Self::Parent6(*extent, *splits, node.clone()),
+        }
+    }
+}
+
+impl<T: Hash, P: Hash, C> Hash for Repr<T, P, C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        discriminant(self).hash(state);
+        match self {
+            Self::Leaf(extent, leaf) => {
+                extent.hash(state);
+                leaf.hash(state);
+            }
+            Self::Leaves1(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Leaves2(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Leaves3(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Leaves4(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Leaves5(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Leaves6(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent1(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent2(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent3(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent4(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent5(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+            Self::Parent6(extent, splits, node) => {
+                extent.hash(state);
+                splits.hash(state);
+                node.hash(state);
+            }
+        }
+    }
+}
+
 /// Holds storage for `N` leaf nodes of type `T`, parent data `P` and a cached value `C`.
-///
-/// Cached data is intentionally ignored by [`Eq`] and friends, since it does not carry any extra
-/// information that is not already present in `leaves`.
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LeavesNode<T, const N: usize, P, C> {
+    cache: C,
     leaves: [T; N],
     parent: P,
-    #[educe(Hash(ignore), Eq(ignore))]
-    cache: C,
+}
+
+impl<T: Hash, const N: usize, P: Hash, C> Hash for LeavesNode<T, N, P, C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // intentionally ignore cache
+        self.leaves.hash(state);
+        self.parent.hash(state);
+    }
 }
 
 /// Holds storage for `N` child [`Node`]s, parent data `P` and a cached value `C`.
-///
-/// Cached data is intentionally ignored by [`Eq`] and friends, since it does not carry any extra
-/// information that is not already present in `leaves`.
-#[derive(Educe)]
-#[educe(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ParentNode<T, const N: usize, P, C> {
+    cache: C,
     children: [Node<T, P, C>; N],
     parent: P,
-    #[educe(Hash(ignore), Eq(ignore))]
-    cache: C,
+}
+
+impl<T: Hash, const N: usize, P: Hash, C> Hash for ParentNode<T, N, P, C> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // intentionally ignore cache
+        self.children.hash(state);
+        self.parent.hash(state);
+    }
 }
 
 /// A region/node within an [Octree] inspired sparse 3D array.
@@ -550,12 +661,7 @@ pub type CacheRef<'a, T> =
     <<T as HexDivNode>::Cache<'a> as Cache<<T as HexDivNode>::LeafRef<'a>>>::Ref<'a>;
 
 /// A reference to the data of a [`HexDivNode`] node.
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub enum NodeDataRef<'a, T: HexDivNode>
-where
-    T::Leaf: 'a,
-{
+pub enum NodeDataRef<'a, T: HexDivNode<Leaf: 'a>> {
     Leaf(T::LeafRef<'a>),
     Parent(&'a T::Parent, CacheRef<'a, T>),
 }
@@ -570,11 +676,79 @@ impl<T: HexDivNode> NodeDataRef<'_, T> {
     }
 }
 
+impl<'a, T: HexDivNode<Leaf: 'a>> Clone for NodeDataRef<'a, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, T: HexDivNode<Leaf: 'a>> Copy for NodeDataRef<'a, T> {}
+
+impl<'a, T: HexDivNode<Leaf: 'a>> fmt::Debug for NodeDataRef<'a, T>
+where
+    T::LeafRef<'a>: fmt::Debug,
+    T::Parent: fmt::Debug,
+    CacheRef<'a, T>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Leaf(leaf) => f.debug_tuple("Leaf").field(leaf).finish(),
+            Self::Parent(parent, cache) => {
+                f.debug_tuple("Parent").field(parent).field(cache).finish()
+            }
+        }
+    }
+}
+
+impl<'a, T: HexDivNode> Hash for NodeDataRef<'a, T>
+where
+    T::LeafRef<'a>: Hash,
+    T::Parent: Hash,
+    CacheRef<'a, T>: Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        discriminant(self).hash(state);
+        match self {
+            Self::Leaf(leaf) => {
+                leaf.hash(state);
+            }
+            Self::Parent(parent, cache) => {
+                parent.hash(state);
+                cache.hash(state);
+            }
+        }
+    }
+}
+
+impl<'a, T: HexDivNode> PartialEq for NodeDataRef<'a, T>
+where
+    T::LeafRef<'a>: PartialEq,
+    T::Parent: PartialEq,
+    CacheRef<'a, T>: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Leaf(leaf), Self::Leaf(other_leaf)) => leaf == other_leaf,
+            (Self::Parent(parent, cache), Self::Parent(other_parent, other_cache)) => {
+                parent == other_parent && cache == other_cache
+            }
+            _ => false,
+        }
+    }
+}
+
+impl<'a, T: HexDivNode> Eq for NodeDataRef<'a, T>
+where
+    T::LeafRef<'a>: Eq,
+    T::Parent: Eq,
+    CacheRef<'a, T>: Eq,
+{
+}
+
 /// A reference to a [`HexDivNode`] node.
 ///
 /// [`NodeRef::Leaf`] is used (exclusively) for virtual nodes used by leaves nodes.
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub enum NodeRef<'a, T: HexDivNode> {
     Node(&'a T),
     Leaf(T::LeafRef<'a>),
@@ -601,9 +775,16 @@ impl<'a, T: HexDivNode> NodeRef<'a, T> {
     }
 }
 
+impl<T: HexDivNode> Clone for NodeRef<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: HexDivNode> Copy for NodeRef<'_, T> {}
+
 /// A reference to a [`HexDivNode`] node that is known to have children.
-#[derive(Educe)]
-#[educe(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct ParentNodeRef<'a, T>(&'a T);
 
 impl<'a, T: HexDivNode> ParentNodeRef<'a, T> {
@@ -611,6 +792,14 @@ impl<'a, T: HexDivNode> ParentNodeRef<'a, T> {
         node.as_data().is_parent().then_some(Self(node))
     }
 }
+
+impl<T> Clone for ParentNodeRef<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for ParentNodeRef<'_, T> {}
 
 impl<'a, T> Deref for ParentNodeRef<'a, T> {
     type Target = &'a T;
@@ -624,13 +813,13 @@ pub struct HexDivDebug<'a, T> {
     node: &'a T,
 }
 
-impl<'a, T: HexDivNode> std::fmt::Debug for HexDivDebug<'a, T>
+impl<'a, T: HexDivNode> fmt::Debug for HexDivDebug<'a, T>
 where
-    T::LeafRef<'a>: std::fmt::Debug,
-    T::Parent: std::fmt::Debug,
-    CacheRef<'a, T>: std::fmt::Debug,
+    T::LeafRef<'a>: fmt::Debug,
+    T::Parent: fmt::Debug,
+    CacheRef<'a, T>: fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.node.as_data() {
             NodeDataRef::Leaf(leaf) => f
                 .debug_struct("Leaf")
@@ -652,13 +841,13 @@ struct ChildrenDebug<'a, T> {
     node: &'a T,
 }
 
-impl<'a, T: HexDivNode> std::fmt::Debug for ChildrenDebug<'a, T>
+impl<'a, T: HexDivNode> fmt::Debug for ChildrenDebug<'a, T>
 where
-    T::LeafRef<'a>: std::fmt::Debug,
-    T::Parent: std::fmt::Debug,
-    CacheRef<'a, T>: std::fmt::Debug,
+    T::LeafRef<'a>: fmt::Debug,
+    T::Parent: fmt::Debug,
+    CacheRef<'a, T>: fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_list = f.debug_list();
         for index in 0..self.node.extent().total_splits() {
             match self.node.get_child(index) {
@@ -669,3 +858,20 @@ where
         debug_list.finish()
     }
 }
+
+/// Can be used to wrap a [`Node`]'s [`Cache`] to prevent it from being compared.
+///
+/// See [`Node`] for more info.
+///
+/// Intentionall does not implement [`Hash`], [`PartialOrd`] and [`Ord`], since this is only meant
+/// to be used for [`Node`], which does not make use of any of these traits.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CacheAlwaysEq<C>(pub C);
+
+impl<C> PartialEq for CacheAlwaysEq<C> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl<C> Eq for CacheAlwaysEq<C> {}
