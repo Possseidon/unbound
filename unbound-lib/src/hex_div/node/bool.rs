@@ -6,11 +6,11 @@ use std::{
 
 use arrayvec::ArrayVec;
 
-use super::{iter::Iter, HexDivNode, NodeDataRef, NodeRef};
+use super::{iter::Iter, HexDivNode, IsParent, NodeDataRef, NodeRef};
 use crate::hex_div::{
-    bounds::Bounds,
+    bounds::CachedBounds,
     cache::{Cache, CacheIn},
-    extent::Extent,
+    extent::{CachedExtent, Extent, HasCachedExtent, HasExtent, Splittable},
     splits::Splits,
 };
 
@@ -58,7 +58,7 @@ impl<C> Hash for BitNode<C> {
 }
 
 impl<'a, C: BitCache> IntoIterator for &'a BitNode<C> {
-    type Item = (Bounds, NodeRef<'a, BitNode<C>>);
+    type Item = (CachedBounds, NodeRef<'a, BitNode<C>>);
     type IntoIter = Iter<'a, BitNode<C>>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -75,74 +75,48 @@ impl<C: BitCache> HexDivNode for BitNode<C> {
 
     type Cache<'a> = C;
 
-    fn new(extent: Extent, leaf: Self::Leaf) -> Self {
+    fn new(extent: CachedExtent, leaf: Self::Leaf) -> Self {
         Self(Repr::Leaf(extent, leaf))
     }
 
     fn from_leaves_unchecked(
-        extent: Extent,
-        splits: Splits,
+        extent: Splittable<CachedExtent>,
         leaves: Self::LeavesBuilder,
         _: Self::Parent,
     ) -> Self {
-        Self(Repr::Leaves(extent, splits, leaves.leaves))
+        Self(Repr::Leaves(extent, leaves.leaves))
     }
 
     fn from_nodes_unchecked(
-        extent: Extent,
-        splits: Splits,
+        extent: Splittable<CachedExtent>,
         nodes: ArrayVec<Self, { Splits::MAX_VOLUME_USIZE }>,
         _: Self::Parent,
     ) -> Self {
-        Self(match splits.total() {
-            1 => Repr::from_nodes(Repr::Parent1, extent, splits, nodes),
-            2 => Repr::from_nodes(Repr::Parent2, extent, splits, nodes),
-            3 => Repr::from_nodes(Repr::Parent3, extent, splits, nodes),
-            4 => Repr::from_nodes(Repr::Parent4, extent, splits, nodes),
-            5 => Repr::from_nodes(Repr::Parent5, extent, splits, nodes),
-            6 => Repr::from_nodes(Repr::Parent6, extent, splits, nodes),
-            _ => panic!("invalid number of splits"),
-        })
-    }
-
-    fn extent(&self) -> Extent {
-        match self.0 {
-            Repr::Leaf(extent, _)
-            | Repr::Leaves(extent, _, _)
-            | Repr::Parent1(extent, _, _)
-            | Repr::Parent2(extent, _, _)
-            | Repr::Parent3(extent, _, _)
-            | Repr::Parent4(extent, _, _)
-            | Repr::Parent5(extent, _, _)
-            | Repr::Parent6(extent, _, _) => extent,
-        }
-    }
-
-    fn splits(&self) -> Splits {
-        match self.0 {
-            Repr::Leaf(..) => panic!("leaf nodes have no splits"),
-            Repr::Leaves(_, splits, _)
-            | Repr::Parent1(_, splits, _)
-            | Repr::Parent2(_, splits, _)
-            | Repr::Parent3(_, splits, _)
-            | Repr::Parent4(_, splits, _)
-            | Repr::Parent5(_, splits, _)
-            | Repr::Parent6(_, splits, _) => splits,
-        }
+        Self(
+            match extent.total_child_splits().expect("invalid extent").get() {
+                1 => Repr::from_nodes(Repr::Parent1, extent, nodes),
+                2 => Repr::from_nodes(Repr::Parent2, extent, nodes),
+                3 => Repr::from_nodes(Repr::Parent3, extent, nodes),
+                4 => Repr::from_nodes(Repr::Parent4, extent, nodes),
+                5 => Repr::from_nodes(Repr::Parent5, extent, nodes),
+                6 => Repr::from_nodes(Repr::Parent6, extent, nodes),
+                _ => panic!("invalid number of splits"),
+            },
+        )
     }
 
     fn as_data(&self) -> NodeDataRef<Self> {
         match &self.0 {
             Repr::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
-            Repr::Leaves(_, _, leaves) => {
+            Repr::Leaves(_, leaves) => {
                 NodeDataRef::Parent(&(), C::compute_cache_from_bits(*leaves))
             }
-            Repr::Parent1(_, _, node) => NodeDataRef::Parent(&(), node.cache),
-            Repr::Parent2(_, _, node) => NodeDataRef::Parent(&(), node.cache),
-            Repr::Parent3(_, _, node) => NodeDataRef::Parent(&(), node.cache),
-            Repr::Parent4(_, _, node) => NodeDataRef::Parent(&(), node.cache),
-            Repr::Parent5(_, _, node) => NodeDataRef::Parent(&(), node.cache),
-            Repr::Parent6(_, _, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent1(_, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent2(_, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent3(_, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent4(_, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent5(_, node) => NodeDataRef::Parent(&(), node.cache),
+            Repr::Parent6(_, node) => NodeDataRef::Parent(&(), node.cache),
         }
     }
 
@@ -158,45 +132,72 @@ impl<C: BitCache> HexDivNode for BitNode<C> {
         let index = usize::from(index);
         match &self.0 {
             Repr::Leaf(_, _) => panic!("leaf nodes have no children"),
-            Repr::Leaves(_, _, leaves) => NodeRef::Leaf(1 << index & leaves != 0),
-            Repr::Parent1(_, _, node) => NodeRef::Node(&node.children[index]),
-            Repr::Parent2(_, _, node) => NodeRef::Node(&node.children[index]),
-            Repr::Parent3(_, _, node) => NodeRef::Node(&node.children[index]),
-            Repr::Parent4(_, _, node) => NodeRef::Node(&node.children[index]),
-            Repr::Parent5(_, _, node) => NodeRef::Node(&node.children[index]),
-            Repr::Parent6(_, _, node) => NodeRef::Node(&node.children[index]),
+            Repr::Leaves(extent, leaves) => {
+                NodeRef::Leaf(extent.child_extent(), 1 << index & leaves != 0)
+            }
+            Repr::Parent1(_, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent2(_, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent3(_, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent4(_, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent5(_, node) => NodeRef::Node(&node.children[index]),
+            Repr::Parent6(_, node) => NodeRef::Node(&node.children[index]),
         }
+    }
+}
+
+impl<C: BitCache> HasExtent for BitNode<C> {
+    fn extent(&self) -> Extent {
+        self.cached_extent().strip_cache()
+    }
+}
+
+impl<C: BitCache> HasCachedExtent for BitNode<C> {
+    fn cached_extent(&self) -> CachedExtent {
+        match self.0 {
+            Repr::Leaf(extent, _) => extent,
+            Repr::Leaves(extent, _)
+            | Repr::Parent1(extent, _)
+            | Repr::Parent2(extent, _)
+            | Repr::Parent3(extent, _)
+            | Repr::Parent4(extent, _)
+            | Repr::Parent5(extent, _)
+            | Repr::Parent6(extent, _) => *extent,
+        }
+    }
+}
+
+impl<C: BitCache> IsParent for BitNode<C> {
+    fn is_parent(&self) -> bool {
+        !matches!(self.0, Repr::Leaf(..))
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum Repr<C> {
-    Leaf(Extent, bool),
-    Leaves(Extent, Splits, u64),
-    Parent1(Extent, Splits, Arc<ParentNode<2, C>>),
-    Parent2(Extent, Splits, Arc<ParentNode<4, C>>),
-    Parent3(Extent, Splits, Arc<ParentNode<8, C>>),
-    Parent4(Extent, Splits, Arc<ParentNode<16, C>>),
-    Parent5(Extent, Splits, Arc<ParentNode<32, C>>),
-    Parent6(Extent, Splits, Arc<ParentNode<64, C>>),
+    Leaf(CachedExtent, bool),
+    Leaves(Splittable<CachedExtent>, u64),
+    Parent1(Splittable<CachedExtent>, Arc<ParentNode<2, C>>),
+    Parent2(Splittable<CachedExtent>, Arc<ParentNode<4, C>>),
+    Parent3(Splittable<CachedExtent>, Arc<ParentNode<8, C>>),
+    Parent4(Splittable<CachedExtent>, Arc<ParentNode<16, C>>),
+    Parent5(Splittable<CachedExtent>, Arc<ParentNode<32, C>>),
+    Parent6(Splittable<CachedExtent>, Arc<ParentNode<64, C>>),
 }
 
-type NewRepr<const N: usize, C> = fn(Extent, Splits, Arc<ParentNode<N, C>>) -> Repr<C>;
+type NewRepr<const N: usize, C> = fn(Splittable<CachedExtent>, Arc<ParentNode<N, C>>) -> Repr<C>;
 
 impl<C: BitCache> Repr<C> {
     fn from_nodes<const N: usize>(
         new: NewRepr<N, C>,
-        extent: Extent,
-        splits: Splits,
+        extent: Splittable<CachedExtent>,
         nodes: ArrayVec<BitNode<C>, { Splits::MAX_VOLUME_USIZE }>,
     ) -> Self {
         let children = array_init::from_iter(nodes).expect("leaves should have correct length");
         new(
             extent,
-            splits,
             Arc::new(ParentNode {
                 cache: C::compute_cache(
-                    extent.split(splits),
+                    extent.child_extent(),
                     children.iter().map(CacheIn::from_node),
                 ),
                 children,
@@ -209,13 +210,13 @@ impl<C> Clone for Repr<C> {
     fn clone(&self) -> Self {
         match self {
             Self::Leaf(extent, leaf) => Self::Leaf(*extent, *leaf),
-            Self::Leaves(extent, splits, leaves) => Self::Leaves(*extent, *splits, *leaves),
-            Self::Parent1(extent, splits, node) => Self::Parent1(*extent, *splits, node.clone()),
-            Self::Parent2(extent, splits, node) => Self::Parent2(*extent, *splits, node.clone()),
-            Self::Parent3(extent, splits, node) => Self::Parent3(*extent, *splits, node.clone()),
-            Self::Parent4(extent, splits, node) => Self::Parent4(*extent, *splits, node.clone()),
-            Self::Parent5(extent, splits, node) => Self::Parent5(*extent, *splits, node.clone()),
-            Self::Parent6(extent, splits, node) => Self::Parent6(*extent, *splits, node.clone()),
+            Self::Leaves(extent, leaves) => Self::Leaves(*extent, *leaves),
+            Self::Parent1(extent, node) => Self::Parent1(*extent, node.clone()),
+            Self::Parent2(extent, node) => Self::Parent2(*extent, node.clone()),
+            Self::Parent3(extent, node) => Self::Parent3(*extent, node.clone()),
+            Self::Parent4(extent, node) => Self::Parent4(*extent, node.clone()),
+            Self::Parent5(extent, node) => Self::Parent5(*extent, node.clone()),
+            Self::Parent6(extent, node) => Self::Parent6(*extent, node.clone()),
         }
     }
 }
@@ -228,39 +229,32 @@ impl<C> Hash for Repr<C> {
                 extent.hash(state);
                 leaf.hash(state);
             }
-            Self::Leaves(extent, splits, leaves) => {
+            Self::Leaves(extent, leaves) => {
                 extent.hash(state);
-                splits.hash(state);
                 leaves.hash(state);
             }
-            Self::Parent1(extent, splits, node) => {
+            Self::Parent1(extent, node) => {
                 extent.hash(state);
-                splits.hash(state);
                 node.hash(state);
             }
-            Self::Parent2(extent, splits, node) => {
+            Self::Parent2(extent, node) => {
                 extent.hash(state);
-                splits.hash(state);
                 node.hash(state);
             }
-            Self::Parent3(extent, splits, node) => {
+            Self::Parent3(extent, node) => {
                 extent.hash(state);
-                splits.hash(state);
                 node.hash(state);
             }
-            Self::Parent4(extent, splits, node) => {
+            Self::Parent4(extent, node) => {
                 extent.hash(state);
-                splits.hash(state);
                 node.hash(state);
             }
-            Self::Parent5(extent, splits, node) => {
+            Self::Parent5(extent, node) => {
                 extent.hash(state);
-                splits.hash(state);
                 node.hash(state);
             }
-            Self::Parent6(extent, splits, node) => {
+            Self::Parent6(extent, node) => {
                 extent.hash(state);
-                splits.hash(state);
                 node.hash(state);
             }
         }
@@ -315,7 +309,7 @@ impl ExactSizeIterator for LeavesBuilder {}
 impl Extend<bool> for LeavesBuilder {
     fn extend<T: IntoIterator<Item = bool>>(&mut self, iter: T) {
         for item in iter {
-            if self.len == Splits::MAX_VOLUME {
+            if self.len == Splits::MAX_VOLUME.get() {
                 panic!("capacity overflow");
             }
             if item {
@@ -381,7 +375,7 @@ impl Cache<bool> for Count {
             inputs
                 .into_iter()
                 .map(|input| match input {
-                    CacheIn::Leaf(true) => extent.volume(),
+                    CacheIn::Leaf(true) => extent.volume().get(),
                     CacheIn::Leaf(false) => 0,
                     CacheIn::Cache(Count(count)) => count,
                 })

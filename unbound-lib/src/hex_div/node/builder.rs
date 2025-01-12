@@ -4,8 +4,8 @@ use arrayvec::ArrayVec;
 
 use super::HexDivNode;
 use crate::hex_div::{
-    bounds::Bounds,
-    extent::Extent,
+    bounds::CachedBounds,
+    extent::{CachedExtent, Extent, HasCachedExtent},
     splits::{SplitList, Splits},
 };
 
@@ -13,7 +13,7 @@ use crate::hex_div::{
 #[derive(Clone, Debug)]
 pub struct Builder<T: HexDivNode> {
     /// The bounds that will be processed by the next call to [`Self::step`].
-    bounds: Bounds,
+    bounds: CachedBounds,
     /// The number of splits
     split_list: SplitList,
     /// Contains all nodes that were built.
@@ -24,22 +24,22 @@ pub struct Builder<T: HexDivNode> {
 
 impl<T: HexDivNode> Builder<T> {
     /// Constructs a [`Builder`] that can build [`T`](HexDivNode)s with the given `extent`.
-    pub fn new(extent: Extent) -> Self {
+    pub fn new(extent: CachedExtent) -> Self {
         Self::with_scratch(extent, Default::default())
     }
 
     /// Constructs a [`Builder`] that reuses the given [`Scratch`] allocations.
-    pub fn with_scratch(extent: Extent, scratch: Scratch<T>) -> Self {
+    pub fn with_scratch(extent: CachedExtent, scratch: Scratch<T>) -> Self {
         Self {
-            bounds: Bounds::with_extent_at_origin(extent),
-            split_list: SplitList::new(extent),
+            bounds: CachedBounds::with_extent_at_origin(extent),
+            split_list: SplitList::compute(extent),
             nodes: scratch.nodes,
             parents: ArrayVec::new(),
         }
     }
 
     /// Returns the bounds that will be process by the next call to [`Self::step`].
-    pub fn bounds(&self) -> Bounds {
+    pub fn bounds(&self) -> CachedBounds {
         self.bounds
     }
 
@@ -56,7 +56,7 @@ impl<T: HexDivNode> Builder<T> {
     /// # Panics
     ///
     /// Panics for invalid [`BuildAction`]s; see [`Self::step`].
-    pub fn build(&mut self, mut build: impl FnMut(Bounds) -> BuildAction<T>) -> T
+    pub fn build(&mut self, mut build: impl FnMut(CachedBounds) -> BuildAction<T>) -> T
     where
         T::Leaf: Clone + Eq,
     {
@@ -99,7 +99,7 @@ impl<T: HexDivNode> Builder<T> {
     where
         T::Leaf: Clone + Eq,
     {
-        self.node_step(T::new(self.bounds.extent(), leaf))
+        self.node_step(T::new(self.bounds.cached_extent(), leaf))
     }
 
     /// Sets the current [`Self::bounds`] to the given `node` and advances [`Self::bounds`].
@@ -130,8 +130,12 @@ impl<T: HexDivNode> Builder<T> {
                 break None;
             }
 
-            let parent_extent = self.bounds.extent().unsplit(splits);
-            self.bounds = self.bounds.resize(parent_extent);
+            let parent_extent = self
+                .bounds
+                .extent()
+                .parent_extent(splits)
+                .expect("builder should not exceed initial node size");
+            self.bounds = self.bounds.resize(*parent_extent);
 
             let first_child = self.nodes.len() - (usize::from(splits.volume() - 1));
             let children = self.nodes.drain(first_child..).chain([node]);
@@ -146,9 +150,11 @@ impl<T: HexDivNode> Builder<T> {
     ///
     /// Panics if the current bounds cannot be split due to covering a single point.
     pub fn parent_step(&mut self, parent: T::Parent) {
-        assert!(!self.bounds.is_point(), "attempt to split a single point");
-        let splits = self.split_list.level(self.parents.len());
-        self.bounds = self.bounds.split_extent(splits);
+        self.bounds = self
+            .bounds
+            .first_child()
+            .expect("attempt to split a single point")
+            .with_cache_unchecked(self.split_list.level(self.parents.len() + 1));
         self.parents.push(parent);
     }
 
@@ -235,7 +241,7 @@ const fn scratch_node_capacity_for(extent: Extent) -> usize {
 /// Purely uses integer maths, so the output for any given `splits` is fully deterministic.
 #[cfg(test)]
 pub(super) fn build_sphere_octant<T: HexDivNode<Leaf = bool, Parent = ()>>(splits: u8) -> T {
-    let extent = Extent::from_splits([splits; 3]).unwrap();
+    let extent = Extent::from_splits([splits; 3]).unwrap().compute_cache();
     let max_distance = 1 << splits;
     let max_distance_squared = max_distance * max_distance;
 
@@ -288,9 +294,9 @@ mod tests {
 
     #[test]
     fn scratch_with_max_capacity_does_not_allocate() {
-        const EXTENT: Extent = Extent::MAX;
+        const EXTENT: CachedExtent = Extent::MAX;
 
-        let scratch = Scratch::with_capacity_for(EXTENT);
+        let scratch = Scratch::with_capacity_for(EXTENT.strip_cache());
         let initial_capacity = scratch.nodes.capacity();
 
         let scratch = build_with_max_capacity(EXTENT, scratch);
@@ -300,10 +306,10 @@ mod tests {
 
     #[test]
     fn scratch_nodes_max_capacity_cannot_be_reduced() {
-        const EXTENT: Extent = Extent::MAX;
+        const EXTENT: CachedExtent = Extent::MAX;
 
         // try with one less scratch space and ensure it allocates
-        const TOO_SMALL_CAPACITY: usize = scratch_node_capacity_for(EXTENT) - 1;
+        const TOO_SMALL_CAPACITY: usize = scratch_node_capacity_for(EXTENT.strip_cache()) - 1;
 
         let scratch = Scratch {
             nodes: Vec::with_capacity(TOO_SMALL_CAPACITY),
@@ -322,7 +328,10 @@ mod tests {
     /// Builds a [`BitNode`] that only contains a single `true` at [`Bounds::MAX_POINT`].
     ///
     /// This has the effect of requiring the maximum possible amount of capacity inside `scratch`.
-    fn build_with_max_capacity(extent: Extent, scratch: Scratch<BitNode>) -> Scratch<BitNode> {
+    fn build_with_max_capacity(
+        extent: CachedExtent,
+        scratch: Scratch<BitNode>,
+    ) -> Scratch<BitNode> {
         let max_point = extent.size() - 1;
         let mut builder = Builder::with_scratch(extent, scratch);
         builder.build(|bounds| {

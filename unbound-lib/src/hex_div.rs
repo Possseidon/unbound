@@ -2,16 +2,16 @@ pub mod bounds;
 pub mod builder;
 pub mod cache;
 pub mod extent;
-pub mod iter;
+// pub mod iter;
 pub mod node;
 pub mod splits;
-pub mod visit;
+// pub mod visit;
 
-use std::{fmt, ops::Deref};
+use std::fmt;
 
 use extent::Extent;
 use glam::UVec3;
-use iter::Iter;
+// use iter::Iter;
 use node::{HexDivDebug, HexDivNode};
 
 use crate::math::bounds::UBounds3;
@@ -21,7 +21,8 @@ use crate::math::bounds::UBounds3;
 /// Non power-of-two sizes are achieved by interpreting parts of the underlying [`HexDivNode`] as
 /// padding.
 ///
-/// TODO: If I implement [`Hash`], [`Eq`] they should ignore the padding.
+/// Does not implement [`Hash`](std::hash::Hash). Since [`Eq`] ignores the padding, calculating a
+/// matching hash efficiently is quite difficult.
 #[derive(Clone, Copy)]
 pub struct HexDiv<T> {
     /// The area within [`Self::root`] that is not padding.
@@ -45,27 +46,26 @@ impl<T: HexDivNode> HexDiv<T> {
     /// Panics if `size` is bigger than [`Extent::MAX`].
     pub fn new(size: UVec3, leaf: T::Leaf) -> Option<Self> {
         size.cmpne(UVec3::ZERO).all().then(|| Self {
-            root: T::new(Extent::ceil_from_size(size).expect("HexDiv too big"), leaf),
+            root: T::new(
+                Extent::ceil_from_size(size)
+                    .expect("HexDiv too big")
+                    .compute_cache(),
+                leaf,
+            ),
             bounds: UBounds3::with_size_at_origin(size),
         })
     }
 
     pub fn from_node(node: T) -> Self {
         Self {
-            bounds: UBounds3::with_size_at_origin(node.extent().size()),
+            bounds: UBounds3::with_size_at_origin(node.cached_extent().size()),
             root: node,
         }
     }
 
-    pub fn iter(&self) -> Iter<T> {
-        Iter::new(self.bounds, &self.root)
-    }
-}
-
-impl<T: HexDivNode> From<T> for HexDiv<T> {
-    fn from(node: T) -> Self {
-        Self::from_node(node)
-    }
+    // pub fn iter(&self) -> Iter<T> {
+    //     Iter::new(self.bounds, &self.root)
+    // }
 }
 
 impl<T: HexDivNode> fmt::Debug for HexDiv<T>
@@ -77,6 +77,24 @@ where
             .field("bounds", &self.bounds)
             .field("root", &self.root.debug())
             .finish()
+    }
+}
+
+impl<T: HexDivNode> PartialEq for HexDiv<T> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.bounds.size() != other.bounds.size() {
+            return false;
+        }
+
+        todo!("self.iter().zip(other).all(|(_, lhs, rhs)| lhs == rhs))");
+    }
+}
+
+impl<T: HexDivNode> Eq for HexDiv<T> {}
+
+impl<T: HexDivNode> From<T> for HexDiv<T> {
+    fn from(node: T) -> Self {
+        Self::from_node(node)
     }
 }
 
@@ -96,15 +114,16 @@ impl<T: HexDivNode> Clone for HexDivNodeRef<'_, T> {
 impl<T: HexDivNode> Copy for HexDivNodeRef<'_, T> {}
 
 #[derive(Debug)]
+#[allow(dead_code)] // TODO: remove
 pub struct HexDivRef<'a, T> {
     bounds: UBounds3,
     root: &'a T,
 }
 
 impl<T: HexDivNode> HexDivRef<'_, T> {
-    pub fn iter(&self) -> Iter<T> {
-        Iter::new(self.bounds, self.root)
-    }
+    // pub fn iter(&self) -> Iter<T> {
+    //     Iter::new(self.bounds, self.root)
+    // }
 }
 
 impl<T> Clone for HexDivRef<'_, T> {
@@ -114,29 +133,3 @@ impl<T> Clone for HexDivRef<'_, T> {
 }
 
 impl<T> Copy for HexDivRef<'_, T> {}
-
-/// A [`HexDivRef`] that is known to have children.
-#[derive(Debug)]
-pub struct ParentHexDivRef<'a, T>(HexDivRef<'a, T>);
-
-impl<'a, T: HexDivNode> ParentHexDivRef<'a, T> {
-    pub fn new(hex_div: HexDivRef<'a, T>) -> Option<Self> {
-        hex_div.root.as_data().is_parent().then_some(Self(hex_div))
-    }
-}
-
-impl<T> Clone for ParentHexDivRef<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for ParentHexDivRef<'_, T> {}
-
-impl<'a, T> Deref for ParentHexDivRef<'a, T> {
-    type Target = HexDivRef<'a, T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}

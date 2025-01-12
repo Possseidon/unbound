@@ -1,6 +1,11 @@
-use glam::{uvec3, UVec3};
+use std::hash::{Hash, Hasher};
 
-use super::{extent::Extent, splits::Splits};
+use glam::{uvec3, BVec3, UVec3};
+
+use super::{
+    extent::{CachedExtent, Extent, HasCachedExtent, HasExtent, Splittable},
+    splits::Splits,
+};
 use crate::math::bounds::UBounds3;
 
 /// The location and size of a [`HexDivNode`](super::HexDivNode).
@@ -51,7 +56,7 @@ impl Bounds {
     }
 
     /// Constructs [`Bounds`] with the given `extent` that contain `point`.
-    pub fn with_extent_at(extent: Extent, point: UVec3) -> Self {
+    pub const fn with_extent_at(extent: Extent, point: UVec3) -> Self {
         Self {
             min: Self::min_with_extent_at(extent, point),
             extent,
@@ -74,8 +79,17 @@ impl Bounds {
     /// # Panics
     ///
     /// Panics if the given `point` is bigger than [`Self::MAX_POINT`] on any axis.
-    pub const fn point(point: UVec3) -> Self {
-        Self::new(point, Extent::ONE)
+    pub const fn point_uncached(point: UVec3) -> Bounds {
+        Bounds::new(point, Extent::ONE_UNCACHED)
+    }
+
+    /// Constructs [`CachedBounds`] of [`Extent::ONE`] at the specified `point`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the given `point` is bigger than [`Self::MAX_POINT`] on any axis.
+    pub const fn point(point: UVec3) -> CachedBounds {
+        CachedBounds::new(point, Extent::ONE)
     }
 
     /// The lower bound (inclusive).
@@ -100,7 +114,7 @@ impl Bounds {
     ///
     /// I.e., if [`Self::extent`] is [`Extent::ONE`].
     pub const fn is_point(self) -> bool {
-        matches!(self.extent, Extent::ONE)
+        matches!(self.extent, Extent::ONE_UNCACHED)
     }
 
     /// If the bounds only cover a single point, returns that point.
@@ -119,28 +133,48 @@ impl Bounds {
 
     /// Whether the specified `point` is part of the [`Bounds`].
     pub const fn contains(self, point: UVec3) -> bool {
-        let max = self.max();
-        (self.min.x <= point.x && point.x <= max.x)
-            && (self.min.y <= point.y && point.y <= max.y)
-            && (self.min.z <= point.z && point.z <= max.z)
+        let diff = Self::min_with_extent_at(self.extent, point).wrapping_sub(self.min);
+        matches!(diff, UVec3::ZERO)
     }
 
     /// Whether all points of `other` are part of the [`Bounds`].
     pub const fn encloses(self, other: Self) -> bool {
-        let self_max = self.max();
-        let other_max = other.max();
-        (self.min.x <= other.min.x && other_max.x <= self_max.x)
-            && (self.min.y <= other.min.y && other_max.y <= self_max.y)
-            && (self.min.z <= other.min.z && other_max.z <= self_max.z)
+        // const workaround for self.min == other.min
+        if let UVec3::ZERO = self.min.wrapping_sub(other.min) {
+            let BVec3 { x, y, z } = self.extent.cmpge(other.extent);
+            x && y && z
+        } else {
+            self.contains(other.min)
+        }
     }
 
     /// Whether the two [`Bounds`] have any point in common.
-    pub const fn overlaps(self, other: Self) -> bool {
-        let self_max = self.max();
-        let other_max = other.max();
-        (self.min.x <= other_max.x && other.min.x <= self_max.x)
-            && (self.min.y <= other_max.y && other.min.y <= self_max.y)
-            && (self.min.z <= other_max.z && other.min.z <= self_max.z)
+    pub const fn intersects(self, other: Self) -> bool {
+        self.contains(other.min) || other.contains(self.min)
+    }
+
+    /// Whether the two [`Bounds`] have no point in common.
+    pub const fn is_disjoint(self, other: Self) -> bool {
+        !self.intersects(other)
+    }
+
+    /// Returns the intersection between the two [`Bounds`].
+    ///
+    /// Returns [`None`] if there is no intersection ([`Bounds`] can never be empty).
+    pub const fn intersection(self, other: Self) -> Option<Self> {
+        // const workaround for self.min == other.min
+        if let UVec3::ZERO = self.min.wrapping_sub(other.min) {
+            Some(Self {
+                min: self.min,
+                extent: self.extent.intersection(other.extent),
+            })
+        } else if self.contains(other.min) {
+            Some(other)
+        } else if other.contains(self.min) {
+            Some(self)
+        } else {
+            None
+        }
     }
 
     /// Resizes the [`Bounds`] to the given `extent`.
@@ -157,31 +191,41 @@ impl Bounds {
         }
     }
 
-    /// Splits the extent of the bounds according to `splits`, keeping [`Self::min`] the same.
+    /// Returns the [`Bounds`] of the first child.
     ///
-    /// # Panics
-    ///
-    /// Panics if [`Self::extent`] cannot be split `splits` times.
-    pub fn split_extent(mut self, splits: Splits) -> Self {
-        self.extent = self.extent.split(splits);
-        self
+    /// Returns [`None`] if the [`Bounds`] has [`Extent::ONE`], which has no children.
+    pub const fn compute_first_child(mut self) -> Option<Self> {
+        if let Some(extent) = self.extent.compute_child_extent() {
+            self.extent = extent;
+            Some(self)
+        } else {
+            None
+        }
     }
 
     /// Expands the [`Bounds`] to its parent using its `parent_splits`.
     ///
+    /// Returns [`None`] if the resulting [`Extent`] exceeds [`Extent::MAX`].
+    ///
     /// This may only be called if `self` is the very first child of the resulting parent.
     ///
     /// This will still panic if `debug_assertions` are enabled.
-    pub fn unsplit_first_child_unchecked(self, parent_splits: Splits) -> Self {
-        let extent = self.extent.unsplit(parent_splits);
+    pub const fn unsplit_first_child_unchecked(
+        self,
+        parent_splits: Splits,
+    ) -> Option<Splittable<CachedBounds>> {
+        let Some(extent) = self.extent.parent_extent(parent_splits) else {
+            return None;
+        };
+        let extent = extent.as_inner().strip_cache();
         debug_assert!(
             Self::is_valid(self.min, extent),
             "should be the first child"
         );
-        Self {
-            min: self.min,
-            extent,
-        }
+        Some(Splittable::new_unchecked_const(CachedBounds {
+            bounds: Self { extent, ..self },
+            child_splits: parent_splits,
+        }))
     }
 
     /// Returns the position of the next child based on the given `parent_splits`.
@@ -190,11 +234,15 @@ impl Bounds {
     ///
     /// Use [`Self::next_min_within`] if you only need the position of the child bounds. The extent
     /// will always match [`Self::extent`], since all children of a parent have the same size.
-    pub fn next_bounds_within(self, parent_splits: Splits) -> Option<Self> {
-        self.next_min_within(parent_splits).map(|min| Self {
-            min,
-            extent: self.extent,
-        })
+    pub const fn next_bounds_within(self, parent_splits: Splits) -> Option<Self> {
+        if let Some(min) = self.next_min_within(parent_splits) {
+            Some(Self {
+                min,
+                extent: self.extent,
+            })
+        } else {
+            None
+        }
     }
 
     /// Similar to [`Self::next_bounds_within`], but only returns [`Self::min`].
@@ -291,5 +339,292 @@ impl Bounds {
         point.y &= u32::MAX << bits_to_clear[1];
         point.z &= u32::MAX << bits_to_clear[2];
         point
+    }
+
+    /// Updates the bounds with the given `extent`.
+    pub const fn with_extent_unchecked(self, extent: Extent) -> Self {
+        debug_assert!(Self::is_valid(self.min, extent));
+        Self { extent, ..self }
+    }
+
+    /// Converts the [`Bounds`] into a [`CachedBounds`] which caches the number of child splits.
+    pub const fn compute_cache(self) -> CachedBounds {
+        CachedBounds {
+            bounds: self,
+            child_splits: Splits::compute(self.extent()),
+        }
+    }
+
+    /// Converts the [`Bounds`] into a [`CachedBounds`] with the given number of `child_splits`.
+    pub const fn with_cache_unchecked(self, child_splits: Splits) -> CachedBounds {
+        debug_assert!(child_splits.to_u32() == Splits::compute(self.extent()).to_u32());
+        CachedBounds {
+            bounds: self,
+            child_splits,
+        }
+    }
+}
+
+impl HasExtent for Bounds {
+    fn extent(&self) -> Extent {
+        (*self).extent()
+    }
+}
+
+/// Contains both a node's [`Bounds`] as well as the cached number of [`Splits`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CachedBounds {
+    /// The [`Bounds`] of the [`HexDivNode`].
+    bounds: Bounds,
+    /// The number of child nodes.
+    ///
+    /// [`Splits::NONE`] iff the [`Extent`] of [`Self::bounds`] is [`Extent::ONE`].
+    child_splits: Splits,
+}
+
+impl CachedBounds {
+    /// Returns a regular [`Bounds`] without the cache.
+    pub const fn strip_cache(self) -> Bounds {
+        self.bounds
+    }
+
+    /// Returns the cached number of child [`Splits`].
+    pub const fn child_splits(self) -> Splits {
+        self.child_splits
+    }
+
+    /// [`Bounds::new`] but taking a [`CachedExtent`].
+    pub const fn new(min: UVec3, extent: CachedExtent) -> Self {
+        Self {
+            bounds: Bounds::new(min, extent.strip_cache()),
+            child_splits: extent.child_splits(),
+        }
+    }
+
+    /// [`Bounds::checked_new`] but taking a [`CachedExtent`].
+    pub const fn checked_new(min: UVec3, extent: CachedExtent) -> Option<Self> {
+        let Some(bounds) = Bounds::checked_new(min, extent.strip_cache()) else {
+            return None;
+        };
+        Some(Self {
+            bounds,
+            child_splits: extent.child_splits(),
+        })
+    }
+
+    /// [`Bounds::new_unchecked`] but taking a [`CachedExtent`].
+    pub const fn new_unchecked(min: UVec3, extent: CachedExtent) -> Self {
+        Self {
+            bounds: Bounds::new_unchecked(min, extent.strip_cache()),
+            child_splits: extent.child_splits(),
+        }
+    }
+
+    /// [`Bounds::with_extent_at`] but taking a [`CachedExtent`].
+    pub const fn with_extent_at(extent: CachedExtent, point: UVec3) -> Self {
+        Self {
+            bounds: Bounds::with_extent_at(extent.strip_cache(), point),
+            child_splits: extent.child_splits(),
+        }
+    }
+
+    /// [`Bounds::with_extent_at_origin`] but taking a [`CachedExtent`].
+    pub const fn with_extent_at_origin(extent: CachedExtent) -> Self {
+        Self {
+            bounds: Bounds::with_extent_at_origin(extent.strip_cache()),
+            child_splits: extent.child_splits(),
+        }
+    }
+
+    /// Delegates to [`Bounds::min`].
+    pub const fn min(self) -> UVec3 {
+        self.bounds.min()
+    }
+
+    /// Delegates to [`Bounds::max`].
+    pub const fn max(self) -> UVec3 {
+        self.bounds.max()
+    }
+
+    /// [`Bounds::extent`] but returning a [`CachedExtent`].
+    pub const fn extent(self) -> CachedExtent {
+        CachedExtent::from_cached_bounds(self)
+    }
+
+    /// Delegates to [`Bounds::extent`].
+    pub const fn extent_uncached(self) -> Extent {
+        self.bounds.extent()
+    }
+
+    /// Delegates to [`Bounds::is_point`].
+    pub const fn is_point(self) -> bool {
+        self.bounds.is_point()
+    }
+
+    /// Delegates to [`Bounds::to_point`].
+    pub const fn to_point(self) -> Option<UVec3> {
+        self.bounds.to_point()
+    }
+
+    /// Delegates to [`Bounds::to_ubounds3`].
+    pub const fn to_ubounds3(self) -> UBounds3 {
+        self.bounds.to_ubounds3()
+    }
+
+    /// Delegates to [`Bounds::contains`].
+    pub const fn contains(self, point: UVec3) -> bool {
+        self.bounds.contains(point)
+    }
+
+    /// Delegates to [`Bounds::encloses`].
+    pub const fn encloses(self, other: Bounds) -> bool {
+        self.bounds.encloses(other)
+    }
+
+    /// Delegates to [`Bounds::intersects`].
+    pub const fn intersects(self, other: Bounds) -> bool {
+        self.bounds.intersects(other)
+    }
+
+    /// Delegates to [`Bounds::is_disjoint`].
+    pub const fn is_disjoint(self, other: Bounds) -> bool {
+        self.bounds.is_disjoint(other)
+    }
+
+    /// Delegates to [`Bounds::intersection`].
+    pub const fn intersection(self, other: Bounds) -> Option<Bounds> {
+        self.bounds.intersection(other)
+    }
+
+    /// [`Bounds::resize`] but taking a [`CachedExtent`] to also update the cached child [`Splits`].
+    pub const fn resize(self, extent: CachedExtent) -> Self {
+        Self {
+            bounds: self.bounds.resize(extent.strip_cache()),
+            child_splits: extent.child_splits(),
+        }
+    }
+
+    /// Delegates to [`Bounds::unsplit_first_child_unchecked`].
+    pub const fn unsplit_first_child_unchecked(
+        self,
+        parent_splits: Splits,
+    ) -> Option<Splittable<Self>> {
+        self.bounds.unsplit_first_child_unchecked(parent_splits)
+    }
+
+    /// Delegates to [`Bounds::next_bounds_within`].
+    ///
+    /// Copies over the cache, since the extent remains unchanged.
+    pub const fn next_bounds_within(self, parent_splits: Splits) -> Option<Self> {
+        if let Some(bounds) = self.bounds.next_bounds_within(parent_splits) {
+            Some(Self { bounds, ..self })
+        } else {
+            None
+        }
+    }
+
+    /// Delegates to [`Bounds::next_min_within`].
+    pub const fn next_min_within(self, parent_splits: Splits) -> Option<UVec3> {
+        self.bounds.next_min_within(parent_splits)
+    }
+
+    /// Delegates to [`Bounds::child_index`].
+    pub const fn child_index(self, parent_splits: Splits) -> u8 {
+        self.bounds.child_index(parent_splits)
+    }
+
+    /// Delegates to [`Bounds::child_offset`].
+    pub const fn child_offset(self, parent_splits: Splits) -> [u8; 3] {
+        self.bounds.child_offset(parent_splits)
+    }
+
+    /// Delegates to [`Bounds::with_child_index`].
+    ///
+    /// Copies over the cache, since the extent remains unchanged.
+    pub const fn with_child_index(self, parent_splits: Splits, index: u8) -> Self {
+        let bounds = self.bounds.with_child_index(parent_splits, index);
+        Self { bounds, ..self }
+    }
+
+    /// Delegates to [`Bounds::with_child_offset`].
+    ///
+    /// Copies over the cache, since the extent remains unchanged.
+    pub const fn with_child_offset(self, parent_splits: Splits, offset: [u8; 3]) -> Self {
+        let bounds = self.bounds.with_child_offset(parent_splits, offset);
+        Self { bounds, ..self }
+    }
+
+    /// [`Bounds::with_extent_unchecked`] but taking a [`CachedExtent`] to also update the child
+    /// [`Splits`].
+    pub const fn with_extent_unchecked(self, extent: CachedExtent) -> Self {
+        Self {
+            bounds: self.bounds.with_extent_unchecked(extent.strip_cache()),
+            child_splits: extent.child_splits(),
+        }
+    }
+
+    /// An optimized version of [`Bounds::compute_first_child`].
+    ///
+    /// This does not require calculating the number of child [`Splits`], since it is cached.
+    pub const fn first_child(self) -> Option<Bounds> {
+        let extent = self.bounds.extent();
+        if let Extent::ONE_UNCACHED = extent {
+            return None;
+        }
+        let Some(child_extent) = extent
+            .with_cache_unchecked(self.child_splits)
+            .child_extent()
+        else {
+            return None;
+        };
+        Some(Bounds {
+            extent: child_extent,
+            min: self.bounds.min,
+        })
+    }
+
+    /// Returns a specific child [`Bounds`] by `index`.
+    ///
+    /// Returns [`None`] if the [`CachedBounds`] has no children.
+    pub const fn child(self, index: u8) -> Option<Bounds> {
+        let Some(first_child) = self.first_child() else {
+            return None;
+        };
+        Some(first_child.with_child_index(self.child_splits, index))
+    }
+}
+
+impl Splittable<CachedBounds> {
+    /// Fowards [`Splittable`] from [`CachedBounds`] to [`CachedExtent`].
+    pub const fn extent(self) -> Splittable<CachedExtent> {
+        Splittable::new_unchecked_const((*self.as_inner()).extent())
+    }
+}
+
+impl Hash for CachedBounds {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.bounds.hash(state);
+        // intentionally ignore splits
+    }
+}
+
+impl PartialEq for CachedBounds {
+    fn eq(&self, other: &Self) -> bool {
+        self.bounds == other.bounds
+        // intentionally ignore splits
+    }
+}
+
+impl Eq for CachedBounds {}
+
+impl HasExtent for CachedBounds {
+    fn extent(&self) -> Extent {
+        self.extent_uncached()
+    }
+}
+
+impl HasCachedExtent for CachedBounds {
+    fn cached_extent(&self) -> CachedExtent {
+        (*self).extent()
     }
 }

@@ -1,4 +1,6 @@
-use super::extent::Extent;
+use std::{hash::Hash, num::NonZeroU8};
+
+use super::extent::{CachedExtent, Extent};
 
 /// The splits to get the [`Extent`] of a [`HexDivNode`](super::HexDivNode) node's child.
 ///
@@ -7,21 +9,39 @@ use super::extent::Extent;
 /// number of child nodes of a [`HexDivNode`](super::HexDivNode).
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub struct Splits {
-    splits: [u8; 3],
+    x: u8,
+    y: u8,
+    z: u8,
 }
 
 impl Splits {
     /// No splits; mainly used as end-marker and padding in [`SplitList`].
-    pub const NONE: Self = Self { splits: [0; 3] };
+    pub const NONE: Self = Self { x: 0, y: 0, z: 0 };
+
+    pub const MAX_BALANCED: Self = Self { x: 2, y: 2, z: 2 };
 
     /// The maximum number of total splits.
-    pub const MAX_TOTAL: u8 = 6;
+    pub const MAX_TOTAL: NonZeroU8 = NonZeroU8::new(6).unwrap();
 
     /// The maximum possible volume.
-    pub const MAX_VOLUME: u8 = 1 << Self::MAX_TOTAL;
+    pub const MAX_VOLUME: NonZeroU8 = NonZeroU8::new(1 << Self::MAX_TOTAL.get()).unwrap();
 
     /// The maximum possible volume as a [`usize`].
-    pub const MAX_VOLUME_USIZE: usize = 1 << Self::MAX_TOTAL;
+    pub const MAX_VOLUME_USIZE: usize = 1 << Self::MAX_TOTAL.get();
+
+    /// Constructs [`Splits`] for the given `extent`.
+    pub const fn compute(extent: Extent) -> Self {
+        let Some(child_extent) = extent.compute_child_extent() else {
+            return Self::NONE;
+        };
+        let [x, y, z] = extent.splits();
+        let [cx, cy, cz] = child_extent.splits();
+        Self {
+            x: x - cx,
+            y: y - cy,
+            z: z - cz,
+        }
+    }
 
     /// The total number of splits across all axes.
     pub const fn total(self) -> u8 {
@@ -35,17 +55,22 @@ impl Splits {
 
     /// The number of splits along the `x` axis.
     pub const fn x(self) -> u8 {
-        self.splits[0]
+        self.x
     }
 
     /// The number of splits along the `y` axis.
     pub const fn y(self) -> u8 {
-        self.splits[1]
+        self.y
     }
 
     /// The number of splits along the `z` axis.
     pub const fn z(self) -> u8 {
-        self.splits[2]
+        self.z
+    }
+
+    /// Converts the splits into a [`u32`] that can be compared in `const` contexts.
+    pub const fn to_u32(self) -> u32 {
+        u32::from_le_bytes([self.x, self.y, self.z, 0])
     }
 
     /// Splits the given child `index` into separate `x`, `y` and `z` positions.
@@ -90,7 +115,7 @@ impl SplitList {
     /// The maximum number of [`Splits`] necessary to create a [`SplitList`] for [`Extent::MAX`].
     pub const MAX: usize = 16;
 
-    /// Constructs a [`SplitList`] for a [`HexDivNode`](super::HexDivNode) with the given `extent`.
+    /// Constructs a [`SplitList`] from the given `extent` all the way down to [`Extent::ONE`].
     ///
     /// The outer split is returned first in the resulting [`SplitList`] and can contain anywhere
     /// between `0` to [`Splits::MAX_TOTAL`] splits along any combination of axes.
@@ -99,45 +124,30 @@ impl SplitList {
     ///
     /// A [`Splits::NONE`] marks the end of the [`SplitList`]. All remaining entries are also padded
     /// with [`Splits::NONE`].
-    pub fn new(extent: Extent) -> Self {
-        let mut split_list = Self::default();
+    pub fn compute(mut extent: CachedExtent) -> Self {
+        let mut result = Self::default();
 
-        let mut index = extent.total_splits().div_ceil(Splits::MAX_TOTAL);
-        let mut remaining_splits = extent.splits();
-        let mut current = Splits::NONE;
-
-        let mut remaining_splits_for_layer = Splits::MAX_TOTAL;
-
-        while remaining_splits != [0; 3] {
-            for (i, remaining_split) in remaining_splits.iter_mut().enumerate() {
-                if let Some(value) = remaining_split.checked_sub(1) {
-                    *remaining_split = value;
-                    current.splits[i] += 1;
-                    remaining_splits_for_layer -= 1;
-
-                    if remaining_splits_for_layer == 0 {
-                        index -= 1;
-                        split_list.levels[usize::from(index)] = current;
-                        remaining_splits_for_layer = Splits::MAX_TOTAL;
-                        current = Splits::NONE;
-                    }
-                }
-            }
+        for level in &mut result.levels {
+            *level = extent.child_splits();
+            let Some(child_extent) = extent.child_extent() else {
+                break;
+            };
+            extent = child_extent.compute_cache();
         }
 
-        if current != Splits::NONE {
-            index -= 1;
-            split_list.levels[usize::from(index)] = current;
-        }
-
-        assert_eq!(index, 0);
-
-        split_list
+        result
     }
 
     /// Returns [`Splits`] at a given level, starting at `0`.
+    ///
+    /// This function acts as if the [`SplitList`] was padded with infinitely many [`Splits::NONE`].
+    /// I.e. it never panics, not even for a `level` of [`usize::MAX`].
     pub const fn level(self, level: usize) -> Splits {
-        self.levels[level]
+        if level < self.levels.len() {
+            self.levels[level]
+        } else {
+            Splits::NONE
+        }
     }
 }
 
@@ -147,13 +157,13 @@ mod tests {
 
     #[test]
     fn split_list_new() {
-        let splits = SplitList::new(Extent::from_splits([5, 10, 4]).unwrap());
+        let splits = SplitList::compute(Extent::from_splits([5, 10, 4]).unwrap().compute_cache());
 
         let mut iter = splits.levels.into_iter();
-        assert_eq!(iter.next(), Some(Splits { splits: [0, 1, 0] }));
-        assert_eq!(iter.next(), Some(Splits { splits: [1, 5, 0] }));
-        assert_eq!(iter.next(), Some(Splits { splits: [2, 2, 2] }));
-        assert_eq!(iter.next(), Some(Splits { splits: [2, 2, 2] }));
+        assert_eq!(iter.next(), Some(Splits { x: 0, y: 1, z: 0 }));
+        assert_eq!(iter.next(), Some(Splits { x: 1, y: 5, z: 0 }));
+        assert_eq!(iter.next(), Some(Splits { x: 2, y: 2, z: 2 }));
+        assert_eq!(iter.next(), Some(Splits { x: 2, y: 2, z: 2 }));
 
         for rest in iter {
             assert_eq!(rest, Splits::NONE);

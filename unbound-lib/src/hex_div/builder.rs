@@ -3,7 +3,6 @@ use std::fmt;
 use glam::UVec3;
 
 use super::{
-    bounds::Bounds,
     extent::Extent,
     node::{
         builder::{BuildAction, Builder as NodeBuilder, Scratch},
@@ -53,7 +52,9 @@ impl<T: HexDivNode> Builder<T> {
         Self {
             bounds: UBounds3::with_size_at_origin(size),
             inner: NodeBuilder::with_scratch(
-                Extent::ceil_from_size(size).expect("HexDiv too big"),
+                Extent::ceil_from_size(size)
+                    .expect("HexDiv too big")
+                    .compute_cache(),
                 scratch,
             ),
         }
@@ -64,7 +65,7 @@ impl<T: HexDivNode> Builder<T> {
     /// Unlike with the underlying [`NodeBuilder`], these bounds might be empty in the case of it
     /// hovering over padding.
     pub fn bounds(&self) -> UBounds3 {
-        Self::transform_bounds(self.bounds, self.inner.bounds())
+        Self::transform_bounds(self.bounds, self.inner.bounds().to_ubounds3())
     }
 
     /// Builds using the given `build` callback.
@@ -114,7 +115,7 @@ impl<T: HexDivNode> Builder<T> {
             bounds: self.bounds,
             root: self
                 .inner
-                .build(|bounds| build(Self::transform_bounds(self.bounds, bounds))),
+                .build(|bounds| build(Self::transform_bounds(self.bounds, bounds.to_ubounds3()))),
         }
     }
 
@@ -154,7 +155,7 @@ impl<T: HexDivNode> Builder<T> {
     /// Transforms bounds from [`Self::inner`] to the actual bounds.
     ///
     /// Can return empty bounds if [`Self::inner`] is hovering over padding.
-    fn transform_bounds(bounds: UBounds3, inner_bounds: Bounds) -> UBounds3 {
-        inner_bounds.to_ubounds3().clamp(bounds) - bounds.lower()
+    fn transform_bounds(bounds: UBounds3, inner_bounds: UBounds3) -> UBounds3 {
+        inner_bounds.clamp(bounds) - bounds.lower()
     }
 }

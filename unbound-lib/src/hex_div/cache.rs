@@ -3,7 +3,7 @@ use super::{
     node::{HexDivNode, NodeDataRef},
 };
 
-/// A value that is calculatable from a collection of `T` and already calculated [`Cache<T>`].
+/// A value that is calculatable from a collection of `T` and already computed [`Cache<T>`].
 ///
 /// `T` is usually a reference to a leaf.
 pub trait Cache<T>: Sized {

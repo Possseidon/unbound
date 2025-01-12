@@ -1,21 +1,106 @@
+pub mod map;
+pub mod visit;
+
 use arrayvec::ArrayVec;
 use bitvec::array::BitArray;
+use map::Map;
+use visit::{Enter, Visit};
 
-use super::{
-    visit::{Enter, VisitNode},
-    HexDivNode, NodeRef, ParentNodeRef,
-};
+use super::{HexDivNode, NodeRef, Parent};
 use crate::hex_div::{
-    bounds::Bounds,
+    bounds::{Bounds, CachedBounds},
+    extent::{HasCachedExtent, Splittable},
     splits::{SplitList, Splits},
 };
+
+/// An [`Iterator`] over a pair of [`Bounds`] and contents of a [`HexDivNode`].
+///
+/// All [`Bounds`] are guaranteed to be returned in a depth-first manner. Only iterators that follow
+/// this order may implement this trait.
+///
+/// This trait itself however does allows skipping certain nodes via
+/// [`HexDivNodeIterator::skip_children`] and [`HexDivNodeIterator::only_child`]. Note however, that
+/// an iterator adaptor that uses these functions to filter out nodes may no longer implement
+/// [`HexDivNodeIterator`]. E.g. [`Visit`], which does just that, does not implement
+/// [`HexDivNodeIterator`], but [`Map`] does, since it still returns the same [`Bounds`] with a
+/// modified [`HexDivNodeIterator::Node`].
+pub trait HexDivNodeIterator: Iterator<Item = (CachedBounds, Self::Node)> {
+    /// The node-related value that is returned along with each [`Bounds`].
+    type Node;
+
+    /// Skip certain child nodes based on the given `enter`.
+    fn enter(&mut self, enter: Option<Enter>) {
+        match enter {
+            None => self.skip_children(),
+            Some(Enter::Only { child }) => self.only_child(child),
+            Some(Enter::All) => {}
+        }
+    }
+
+    /// Skips over the children of the previous node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the previous node cannot be entered, since it will get skipped automatically.
+    ///
+    /// Panics if [`HexDivNodeIterator::skip_children`] or [`HexDivNodeIterator::only_child`] was
+    /// already called before calling [`Iter::next`].
+    fn skip_children(&mut self);
+
+    /// Only enters the child with the given `index` of the previous node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the previous node cannot be entered.
+    ///
+    /// Panics if [`HexDivNodeIterator::skip_children`] or [`HexDivNodeIterator::only_child`] was
+    /// already called before calling [`Iter::next`].
+    ///
+    /// Panics if the index is out of bounds.
+    fn only_child(&mut self, index: u8);
+
+    /// Efficiently filters out entire parent nodes based on a callback.
+    ///
+    /// This calls [`HexDivNodeIterator::skip_children`] and [`HexDivNodeIterator::only_child`]
+    /// based on the callback.
+    ///
+    /// The resulting iterator is no longer a [`HexDivNodeIterator`], since it no longer returns all
+    /// [`Bounds`], which [`HexDivNodeIterator`] requires.
+    fn visit<V>(self, visit: V) -> Visit<Self, V>
+    where
+        Self: Sized,
+        V: FnMut(Splittable<CachedBounds>, Parent<Self::Node>) -> Option<Enter>,
+    {
+        Visit::new(self, visit)
+    }
+
+    /// Takes a closure and creates an iterator which calls that closure on each node.
+    ///
+    /// Similar to [`Iterator::map`], but does not modifiy the [`Bounds`].
+    ///
+    /// The resulting iterator is still [`HexDivNodeIterator`], since the [`Bounds`] are still
+    /// valid.
+    fn hex_div_map<B, F>(self, f: F) -> Map<Self, F>
+    where
+        Self: Sized,
+        F: FnMut(Bounds, Self::Node) -> B,
+    {
+        Map::new(self, f)
+    }
+}
+
+pub trait IntoHexDivNodeIterator: IntoIterator<IntoIter: HexDivNodeIterator> {}
+impl<T: IntoIterator<IntoIter: HexDivNodeIterator>> IntoHexDivNodeIterator for T {}
 
 /// An iterator that iterates over the nodes of a [`HexDivNode`].
 ///
 /// By default, all nodes are visited:
 ///
 /// ```
-/// # use unbound_lib::hex_div::{extent::Extent, node::Node, HexDiv};
+/// # use unbound_lib::hex_div::{
+/// #     extent::Extent,
+/// #     node::{HexDivNode, Node},
+/// # };
 /// let root = Node::<u32>::with_default(Extent::ONE);
 ///
 /// for (bounds, node) in &root {
@@ -32,11 +117,14 @@ use crate::hex_div::{
 /// that can decide which nodes to enter.
 ///
 /// ```
-/// # use unbound_lib::hex_div::{extent::Extent, node::Node, visit::Enter, HexDiv};
+/// # use unbound_lib::hex_div::{
+/// #     extent::Extent,
+/// #     node::{iter::HexDivNodeIterator, HexDivNode, Node},
+/// # };
 /// # let root = Node::<u32>::with_default(Extent::ONE);
-/// let filtered = root.iter().visit(|node| {
+/// let filtered = root.iter().visit(|bounds, node| {
 ///     // filter e.g. based on bounds
-///     Enter::None
+///     None
 /// });
 ///
 /// for (bounds, node) in filtered {
@@ -50,7 +138,10 @@ use crate::hex_div::{
 /// be solved with e.g. [interior mutability], there is a way to avoid the callback entirely:
 ///
 /// ```
-/// # use unbound_lib::hex_div::{extent::Extent, node::Node, HexDiv};
+/// # use unbound_lib::hex_div::{
+/// #     extent::Extent,
+/// #     node::{iter::HexDivNodeIterator, HexDivNode, IsParent, Node},
+/// # };
 /// # let root = Node::<u32>::with_default(Extent::ONE);
 /// let mut iter = root.iter();
 /// while let Some((bounds, node)) = iter.next() {
@@ -68,7 +159,10 @@ use crate::hex_div::{
 /// while efficiently skipping over the remaining (up to) 63 neighboring nodes for each layer:
 ///
 /// ```
-/// # use unbound_lib::hex_div::{extent::Extent, node::Node, HexDiv};
+/// # use unbound_lib::hex_div::{
+/// #     extent::Extent,
+/// #     node::{iter::HexDivNodeIterator, HexDivNode, IsParent, Node},
+/// # };
 /// # let root = Node::<u32>::with_default(Extent::ONE);
 /// let mut iter = root.iter();
 /// while let Some((bounds, node)) = iter.next() {
@@ -100,13 +194,13 @@ pub struct Iter<'a, T> {
     ///      it has not yet been yielded.
     ///    - The next call to [`Self::next`] will yield this node.
     ///    - [`Self::skip_children`] and [`Self::only_child`] will panic in this state.
-    bounds: Bounds,
+    bounds: CachedBounds,
     /// Indicates, that the root of the [`HexDivNode`] should be yielded.
     ///
     /// Upon the first call to [`Self::next`] it is either cleared or moved into [`Self::parents`].
     root: Option<&'a T>,
     /// Contains the full path of parent nodes describing the iterator's position.
-    parents: ArrayVec<ParentNodeRef<'a, T>, { SplitList::MAX }>,
+    parents: ArrayVec<Parent<&'a T>, { SplitList::MAX }>,
     /// An extension to [`Self::parents`] that indicates whether only a single child was entered.
     enter_only: BitArray<u16>,
 }
@@ -114,67 +208,11 @@ pub struct Iter<'a, T> {
 impl<'a, T: HexDivNode> Iter<'a, T> {
     pub(super) fn new(root: &'a T) -> Self {
         Self {
-            bounds: Bounds::with_extent_at_origin(root.extent()),
+            bounds: CachedBounds::with_extent_at_origin(root.cached_extent()),
             root: Some(root),
             parents: ArrayVec::new(),
             enter_only: BitArray::default(),
         }
-    }
-
-    /// Filters out entire parent nodes based on a callback.
-    ///
-    /// This calls [`Self::skip_children`] and [`Self::only_child`] based on the callback.
-    pub fn visit<V: FnMut(VisitNode<'a, T>) -> Enter>(self, visit: V) -> Visit<'a, T, V> {
-        Visit {
-            iter: self,
-            visit,
-            prev_node: None,
-        }
-    }
-
-    /// Skips over the children of the previous node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the previous node cannot be entered, since it will get skipped automatically.
-    ///
-    /// Panics if [`Self::skip_children`] or [`Self::only_child`] was already called before calling
-    /// [`Iter::next`].
-    pub fn skip_children(&mut self) {
-        let Some(parent) = self.parents.last() else {
-            self.panic_skip_or_enter();
-        };
-        assert!(self.bounds.extent() == parent.extent());
-        self.parents.pop();
-
-        if let Some(parent) = self.parents.last() {
-            let splits = parent.splits();
-            let index = self.bounds.child_index(splits);
-            self.next_neighbor(index, splits);
-        }
-    }
-
-    /// Only enters the child with the given `index` of the previous node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the previous node cannot be entered.
-    ///
-    /// Panics if [`Self::skip_children`] or [`Self::only_child`] was already called before calling
-    /// [`Iter::next`].
-    ///
-    /// Panics if the index is out of bounds.
-    pub fn only_child(&mut self, index: u8) {
-        let Some(parent) = self.parents.last() else {
-            self.panic_skip_or_enter();
-        };
-        assert!(self.bounds.extent() == parent.extent());
-        let splits = parent.splits();
-        self.bounds = self
-            .bounds
-            .split_extent(splits)
-            .with_child_index(splits, index);
-        self.enter_only.set(self.parents.len() - 1, true);
     }
 
     /// Panics with an appropriate message for trying to skip or enter if there is no parent node.
@@ -187,10 +225,10 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
     }
 
     /// Checks, if [`Self::root`] is still set and, if so, returns and also clears it.
-    fn take_root(&mut self) -> Option<(Bounds, NodeRef<'a, T>)> {
+    fn take_root(&mut self) -> Option<(CachedBounds, NodeRef<'a, T>)> {
         self.root.take().map(|root| {
             let bounds = self.bounds;
-            if let Some(parent) = ParentNodeRef::new(root) {
+            if let Some(parent) = Parent::new(root) {
                 self.parents.push(parent);
             }
             (bounds, NodeRef::Node(root))
@@ -198,19 +236,20 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
     }
 
     /// Advances the iterator, assuming [`Self::root`] is empty.
-    fn advance(&mut self) -> Option<(Bounds, NodeRef<'a, T>)> {
+    fn advance(&mut self) -> Option<(CachedBounds, NodeRef<'a, T>)> {
         let parent = *self.parents.last()?;
-        let splits = parent.splits();
+        let splits = parent.extent().child_splits();
 
-        let (bounds, index, child) = if self.bounds.extent() == parent.extent() {
-            self.bounds = self.bounds.split_extent(splits);
-            (self.bounds, 0, parent.get_child(0))
+        let (bounds, index, child) = if self.bounds.extent() == *parent.extent() {
+            let child = parent.get_child(0);
+            self.bounds = self.bounds.with_extent_unchecked(child.cached_extent());
+            (self.bounds, 0, child)
         } else {
             let index = self.bounds.child_index(splits);
             (self.bounds, index, parent.get_child(index))
         };
 
-        assert_ne!(self.bounds.extent(), parent.extent());
+        assert_ne!(self.bounds.extent(), *parent.extent());
 
         if let Some(parent) = child.as_parent() {
             self.parents.push(parent);
@@ -241,14 +280,17 @@ impl<'a, T: HexDivNode> Iter<'a, T> {
                 }
             }
 
-            self.bounds = self.bounds.unsplit_first_child_unchecked(splits);
+            self.bounds = *self
+                .bounds
+                .unsplit_first_child_unchecked(splits)
+                .expect("iteration should not exceed initial node size");
             self.parents.pop();
 
             let Some(parent) = self.parents.last() else {
                 break;
             };
 
-            splits = parent.splits();
+            splits = parent.extent().child_splits();
             index = self.bounds.child_index(splits);
         }
     }
@@ -277,35 +319,41 @@ impl<T> Default for Iter<'_, T> {
 }
 
 impl<'a, T: HexDivNode> Iterator for Iter<'a, T> {
-    type Item = (Bounds, NodeRef<'a, T>);
+    type Item = (CachedBounds, NodeRef<'a, T>);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.take_root().or_else(|| self.advance())
     }
 }
 
-pub struct Visit<'a, T: HexDivNode, V> {
-    iter: Iter<'a, T>,
-    visit: V,
-    prev_node: Option<VisitNode<'a, T>>,
-}
+impl<'a, T: HexDivNode> HexDivNodeIterator for Iter<'a, T> {
+    type Node = NodeRef<'a, T>;
 
-impl<'a, T: HexDivNode, V: FnMut(VisitNode<'a, T>) -> Enter> Iterator for Visit<'a, T, V> {
-    type Item = (Bounds, NodeRef<'a, T>);
+    fn skip_children(&mut self) {
+        let Some(parent) = self.parents.last() else {
+            self.panic_skip_or_enter();
+        };
+        assert!(self.bounds.extent() == *parent.extent());
+        self.parents.pop();
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(node) = self.prev_node.take() {
-            match (self.visit)(node) {
-                Enter::None => self.iter.skip_children(),
-                Enter::Only { child } => self.iter.only_child(child),
-                Enter::All => {}
-            }
+        if let Some(parent) = self.parents.last() {
+            let splits = parent.extent().child_splits();
+            let index = self.bounds.child_index(splits);
+            self.next_neighbor(index, splits);
         }
-        self.iter.next().inspect(|&(bounds, node)| {
-            if let Some(node) = node.as_parent() {
-                self.prev_node = Some(VisitNode { bounds, node })
-            }
-        })
+    }
+
+    fn only_child(&mut self, index: u8) {
+        let Some(parent) = self.parents.last() else {
+            self.panic_skip_or_enter();
+        };
+        assert!(self.bounds.extent() == *parent.extent());
+        let child_extent = parent.get_child(index).cached_extent();
+        self.bounds = self
+            .bounds
+            .with_extent_unchecked(child_extent)
+            .with_child_index(parent.cached_extent().child_splits(), index);
+        self.enter_only.set(self.parents.len() - 1, true);
     }
 }
 
@@ -341,7 +389,7 @@ mod tests {
 
         let nodes = root
             .iter()
-            .visit(|_| Enter::All)
+            .visit(|_, _| Some(Enter::All))
             .counts_by(|(_, node)| node.data());
 
         assert_eq!(nodes[&NodeDataRef::Parent(&(), NoBitCache)], 483);
@@ -353,39 +401,34 @@ mod tests {
     fn visit_none_yields_only_the_root_node() {
         let root = build_sphere_octant::<BitNode>(6);
 
-        let nodes = root.iter().visit(|_| Enter::None);
+        let nodes = root.iter().visit(|_, _| None);
 
-        let bounds = Bounds::with_extent_at_origin(root.extent());
+        let bounds = CachedBounds::with_extent_at_origin(root.cached_extent());
         assert_equal(nodes, [(bounds, NodeRef::Node(&root))]);
     }
 
     #[test]
     fn visit_only_yields_specific_nodes() {
         let root = build_sphere_octant::<BitNode<Count>>(6);
-        let bounds = Bounds::with_extent_at_origin(root.extent());
-        let splits = root.splits();
+        let bounds = CachedBounds::with_extent_at_origin(root.cached_extent());
 
-        let nodes = root.iter().visit(|_| Enter::Only { child: 0 });
         assert_equal(
-            nodes,
+            root.iter()
+                .visit(|_, _| Some(Enter::Only { child: 0 }))
+                .map(|(bounds, node)| (bounds.strip_cache(), node)),
             [
-                (bounds, NodeRef::Node(&root)),
-                (
-                    bounds.split_extent(splits).with_child_index(splits, 0),
-                    root.get_child(0),
-                ),
+                (bounds.strip_cache(), NodeRef::Node(&root)),
+                (bounds.first_child().unwrap(), root.get_child(0)),
             ],
         );
 
-        let nodes = root.iter().visit(|_| Enter::Only { child: 63 });
         assert_equal(
-            nodes,
+            root.iter()
+                .visit(|_, _| Some(Enter::Only { child: 63 }))
+                .map(|(bounds, node)| (bounds.strip_cache(), node)),
             [
-                (bounds, NodeRef::Node(&root)),
-                (
-                    bounds.split_extent(splits).with_child_index(splits, 63),
-                    root.get_child(63),
-                ),
+                (bounds.strip_cache(), NodeRef::Node(&root)),
+                (bounds.child(63).unwrap(), root.get_child(63)),
             ],
         );
 
@@ -394,10 +437,12 @@ mod tests {
         // child index along diagonal -> [0b10_10_10, 0b01_01_01, 0b00_00_00]
         // convert to base 10         -> [        42,         21,          0]
 
-        let mut child_chain = [42, 21, 0].into_iter().map(|child| Enter::Only { child });
+        let mut child_chain = [42, 21, 0]
+            .into_iter()
+            .map(|child| Some(Enter::Only { child }));
         let nodes = root
             .iter()
-            .visit(|_| child_chain.next().unwrap())
+            .visit(|_, _| child_chain.next().unwrap())
             .map(|(_, node)| node.data());
         assert_equal(
             nodes,
@@ -453,14 +498,13 @@ mod tests {
     #[should_panic = "child index out of bounds"]
     fn only_child_panics_if_the_index_is_out_of_bounds() {
         // 2x1x1 BitNode with [true, false]
-        let root: BitNode = Builder::new(Extent::from_splits([1, 0, 0]).unwrap()).build(|bounds| {
-            match bounds.to_point() {
+        let root: BitNode = Builder::new(Extent::from_splits([1, 0, 0]).unwrap().compute_cache())
+            .build(|bounds| match bounds.to_point() {
                 Some(UVec3 { x: 0, y: 0, z: 0 }) => BuildAction::Fill(true),
                 Some(UVec3 { x: 1, y: 0, z: 0 }) => BuildAction::Fill(false),
                 Some(_) => unreachable!(),
                 None => BuildAction::Split(()),
-            }
-        });
+            });
         let mut iter = root.iter();
         assert!(iter.next().is_some());
 
