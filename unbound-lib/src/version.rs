@@ -300,12 +300,12 @@ pub enum VersionReq {
 }
 
 impl VersionReq {
-    /// Creates a new dev version requirement with the given minor and patch version.
+    /// Constructs a [`VersionReq::Dev`] with the given minor and patch version.
     pub fn dev(minor_exact: NonZeroU64, patch_min: u64) -> Self {
         Self::Dev(DevVersionReq::new(minor_exact, patch_min))
     }
 
-    /// Creates a new release version requirement with the given major and minor version.
+    /// Constructs a [`VersionReq::Release`] with the given major and minor version.
     pub fn release(major_exact: NonZeroU64, minor_min: u64) -> Self {
         Self::Release(ReleaseVersionReq::new(major_exact, minor_min))
     }
