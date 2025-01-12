@@ -46,7 +46,7 @@ impl Enter {
     /// Constructs an [`Enter`] that skips over nodes outside of `target`.
     ///
     /// - `bounds` is the (possibly clamped) bounds of the node
-    /// - `node_extent` is the _full_ [`Extent`] of the node
+    /// - `node_extent` is the _full_ [`CachedExtent`] of the node
     /// - `splits` is the number of splits of the node
     /// - `target` is the targeted area to be entered within `bounds`
     /// - `enter_target` indicates whether `target` and its children should also be entered
