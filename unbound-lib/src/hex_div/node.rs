@@ -829,15 +829,17 @@ where
         match self.node.as_data() {
             NodeDataRef::Leaf(leaf) => f
                 .debug_struct("Leaf")
-                .field("extent", &self.node.cached_extent())
+                .field("extent", &self.node.cached_extent().extent())
+                .field("child_splits", &self.node.cached_extent().child_splits())
                 .field("leaf", &leaf)
                 .finish(),
             NodeDataRef::Parent(parent, cache) => f
                 .debug_struct("Parent")
-                .field("extent", &self.node.cached_extent())
+                .field("extent", &self.node.cached_extent().extent())
+                .field("child_splits", &self.node.cached_extent().child_splits())
                 .field("parent", parent)
                 .field("cache", &cache)
-                .field("children", &(ChildrenDebug { node: self.node }))
+                .field("children", &ChildrenDebug { node: self.node })
                 .finish(),
         }
     }
@@ -855,14 +857,31 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_list = f.debug_list();
-        for index in 0..self.node.extent().total_splits() {
+        for index in 0..self.node.cached_extent().child_splits().volume() {
             match self.node.get_child(index) {
                 NodeRef::Node(node) => debug_list.entry(&HexDivDebug { node }),
-                // TODO: LeafDebug that prints { extent: _, leaf: 42 } or just 42 if extent is ONE
-                NodeRef::Leaf(extent, leaf) => debug_list.entry(&(extent, leaf)),
+                NodeRef::Leaf(extent, leaf) => debug_list.entry(&LeafDebug { extent, leaf }),
             };
         }
         debug_list.finish()
+    }
+}
+
+struct LeafDebug<T> {
+    extent: Extent,
+    leaf: T,
+}
+
+impl<T: fmt::Debug> fmt::Debug for LeafDebug<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.extent == Extent::ONE {
+            self.leaf.fmt(f)
+        } else {
+            f.debug_struct("Leaf")
+                .field("extent", &self.extent)
+                .field("leaf", &self.leaf)
+                .finish()
+        }
     }
 }
 
@@ -921,4 +940,11 @@ impl<T: IsParent> IsParent for &T {
     fn is_parent(&self) -> bool {
         (*self).is_parent()
     }
+}
+
+#[test]
+fn test() {
+    let hex_div: bool::BitNode = builder::build_sphere_octant(3);
+    println!("{:#?}", hex_div.debug());
+    panic!();
 }
