@@ -12,7 +12,7 @@ use std::{
 };
 
 use arrayvec::ArrayVec;
-use iter::Iter;
+use iter::{HexDivIterator, HexDivLeafExIterator, Iter};
 use itertools::zip_eq;
 
 use super::{
@@ -500,6 +500,11 @@ pub trait HexDivNode: HasCachedExtent + IsParent + Sized {
         Self::new(extent, Default::default())
     }
 
+    /// Fills the entire node with the given leaf value.
+    fn fill(&mut self, leaf: Self::Leaf) {
+        *self = Self::new(self.cached_extent(), leaf);
+    }
+
     /// Constructs a [`HexDivNode`] from a set of `children`.
     ///
     /// Prefer using [`Builder`](builder::Builder), which is far more flexible and less error prone.
@@ -528,7 +533,7 @@ pub trait HexDivNode: HasCachedExtent + IsParent + Sized {
         // ensure all children have same extent
         let children = children.inspect(|child| assert_eq!(child.extent(), child_extent));
 
-        // ensure there is exactly count children
+        // ensure the number of children matches splits
         let mut children = zip_eq(1..splits.volume(), children);
 
         match first.into_leaf() {
@@ -608,6 +613,13 @@ pub trait HexDivNode: HasCachedExtent + IsParent + Sized {
         parent: Self::Parent,
     ) -> Self;
 
+    /// Returns a reference to one of the children of this node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds or when called on a leaf node.
+    fn get_child(&self, index: u8) -> NodeRef<Self>;
+
     /// Returns a reference to the underlying data of this node.
     ///
     /// - For leaf nodes: [`HexDivNode::LeafRef`]
@@ -619,22 +631,19 @@ pub trait HexDivNode: HasCachedExtent + IsParent + Sized {
     /// If the node is not a leaf, the node is returned unchanged as an [`Err`].
     fn into_leaf(self) -> Result<Self::Leaf, Self>;
 
-    /// Fills the entire node with the given leaf value.
-    fn fill(&mut self, leaf: Self::Leaf) {
-        *self = Self::new(self.cached_extent(), leaf);
-    }
-
-    /// Returns an iterator that traverses nodes depth-first.
+    /// Returns a [`HexDivNodeIterator`](iter::HexDivNodeIterator) traversing all nodes depth-first.
     fn iter(&self) -> Iter<Self> {
         Iter::new(self)
     }
 
-    /// Returns a reference to one of the children of this node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `index` is out of bounds or when called on a leaf node.
-    fn get_child(&self, index: u8) -> NodeRef<Self>;
+    /// Returns a [`HexDivLeafExIterator`] traversing all leaf nodes in depth-first order.
+    fn iter_leaves(&self) -> impl HexDivLeafExIterator<Node = Self::LeafRef<'_>> {
+        self.iter().filter_leaves().map_nodes(|_, node| {
+            node.data()
+                .as_leaf()
+                .expect("leaf nodes should contain leaf data")
+        })
+    }
 
     /// Returns a generic [`Debug`](std::fmt::Debug) implementation with concise output.
     ///
@@ -655,13 +664,29 @@ pub enum NodeDataRef<'a, T: HexDivNode<Leaf: 'a>> {
     Parent(&'a T::Parent, CacheRef<'a, T>),
 }
 
-impl<T: HexDivNode> NodeDataRef<'_, T> {
+impl<'a, T: HexDivNode> NodeDataRef<'a, T> {
     pub fn is_leaf(self) -> bool {
         matches!(self, Self::Leaf(..))
     }
 
+    pub fn as_leaf(self) -> Option<T::LeafRef<'a>> {
+        if let Self::Leaf(leaf) = self {
+            Some(leaf)
+        } else {
+            None
+        }
+    }
+
     pub fn is_parent(self) -> bool {
         matches!(self, Self::Parent(..))
+    }
+
+    pub fn as_parent(self) -> Option<(&'a T::Parent, CacheRef<'a, T>)> {
+        if let Self::Parent(parent, cache) = self {
+            Some((parent, cache))
+        } else {
+            None
+        }
     }
 }
 
@@ -873,12 +898,6 @@ impl<T> Deref for Parent<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl<T: Clone> Parent<&T> {
-    fn cloned(&self) -> Parent<T> {
-        Parent(self.0.clone())
     }
 }
 

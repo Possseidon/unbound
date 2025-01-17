@@ -18,8 +18,6 @@ impl Splits {
     /// No splits; mainly used as end-marker and padding in [`SplitList`].
     pub const NONE: Self = Self { x: 0, y: 0, z: 0 };
 
-    pub const MAX_BALANCED: Self = Self { x: 2, y: 2, z: 2 };
-
     /// The maximum number of total splits.
     pub const MAX_TOTAL: NonZeroU8 = NonZeroU8::new(6).unwrap();
 
