@@ -941,10 +941,3 @@ impl<T: IsParent> IsParent for &T {
         (*self).is_parent()
     }
 }
-
-#[test]
-fn test() {
-    let hex_div: bool::BitNode = builder::build_sphere_octant(3);
-    println!("{:#?}", hex_div.debug());
-    panic!();
-}
