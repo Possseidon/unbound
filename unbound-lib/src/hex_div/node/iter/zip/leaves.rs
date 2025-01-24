@@ -1,6 +1,6 @@
 use std::iter::FusedIterator;
 
-use super::{zipped_next, zipped_skip_node, Advance};
+use super::Advance;
 use crate::hex_div::{
     bounds::CachedBounds,
     extent::CachedExtent,
@@ -53,7 +53,7 @@ where
     type Item = (CachedBounds, <Self as HexDivIterator>::Node);
 
     fn next(&mut self) -> Option<Self::Item> {
-        zipped_next(self.check_advance(), &mut self.a, &mut self.b)
+        Some(self.check_advance()?.zipped_next(&mut self.a, &mut self.b))
     }
 }
 
@@ -92,7 +92,9 @@ where
     }
 
     fn skip_node(&mut self) {
-        zipped_skip_node(self.check_advance(), &mut self.a, &mut self.b);
+        self.check_advance()
+            .expect("iteration already over")
+            .zipped_skip_node(&mut self.a, &mut self.b);
     }
 
     fn has_children(&mut self) -> bool {

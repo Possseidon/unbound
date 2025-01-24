@@ -11,46 +11,43 @@ enum Advance {
     Both,
 }
 
-#[allow(clippy::type_complexity)]
-fn zipped_next<A, B>(
-    advance: Option<Advance>,
-    a: &mut A,
-    b: &mut B,
-) -> Option<(CachedBounds, (A::Node, B::Node))>
-where
-    A: HexDivIterator + HexDivPeekNodeIterator,
-    B: HexDivIterator + HexDivPeekNodeIterator,
-{
-    match advance? {
-        Advance::A => Some(zipped_advance(a, b)),
-        Advance::B => {
-            let (bounds, (b, a)) = zipped_advance(b, a);
-            Some((bounds, (a, b)))
-        }
-        Advance::Both => {
-            let (a_bounds, a_node) = a.next().expect("iteration should not be over");
-            let (b_bounds, b_node) = b.next().expect("iteration should not be over");
-            debug_assert_eq!(a_bounds, b_bounds, "zipped iterators should be in sync");
-            Some((a_bounds, (a_node, b_node)))
+impl Advance {
+    fn zipped_next<A, B>(self, a: &mut A, b: &mut B) -> (CachedBounds, (A::Node, B::Node))
+    where
+        A: HexDivIterator + HexDivPeekNodeIterator,
+        B: HexDivIterator + HexDivPeekNodeIterator,
+    {
+        match self {
+            Advance::A => zipped_advance(a, b),
+            Advance::B => {
+                let (bounds, (b, a)) = zipped_advance(b, a);
+                (bounds, (a, b))
+            }
+            Advance::Both => {
+                let (a_bounds, a_node) = a.next().expect("iteration should not be over");
+                let (b_bounds, b_node) = b.next().expect("iteration should not be over");
+                debug_assert_eq!(a_bounds, b_bounds, "zipped iterators should be in sync");
+                (a_bounds, (a_node, b_node))
+            }
         }
     }
-}
 
-fn zipped_skip_node<A, B>(advance: Option<Advance>, a: &mut A, b: &mut B)
-where
-    A: HexDivIterator + HexDivPeekNodeIterator,
-    B: HexDivIterator + HexDivPeekNodeIterator,
-{
-    match advance.expect("iteration already over") {
-        Advance::A => {
-            zipped_advance(a, b);
-        }
-        Advance::B => {
-            zipped_advance(b, a);
-        }
-        Advance::Both => {
-            a.skip_node();
-            b.skip_node();
+    fn zipped_skip_node<A, B>(self, a: &mut A, b: &mut B)
+    where
+        A: HexDivIterator + HexDivPeekNodeIterator,
+        B: HexDivIterator + HexDivPeekNodeIterator,
+    {
+        match self {
+            Advance::A => {
+                zipped_advance(a, b);
+            }
+            Advance::B => {
+                zipped_advance(b, a);
+            }
+            Advance::Both => {
+                a.skip_node();
+                b.skip_node();
+            }
         }
     }
 }
