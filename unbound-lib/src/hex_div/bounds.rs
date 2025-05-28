@@ -280,7 +280,7 @@ impl Bounds {
     /// Returns the child index based on the given `parent_splits`.
     pub const fn child_index(self, parent_splits: Splits) -> u8 {
         let [x, y, z] = self.child_offset(parent_splits);
-        x | y << parent_splits.x() | z << (parent_splits.x() + parent_splits.y())
+        x | (y << parent_splits.x()) | (z << (parent_splits.x() + parent_splits.y()))
     }
 
     /// Returns the `[x, y, z]` offset based on the given `parent_splits`.
@@ -310,9 +310,9 @@ impl Bounds {
         let z_index_mask = !(!(u32::MAX << parent_splits.z()) << bit_offset[2]);
         Self {
             min: uvec3(
-                self.min.x & x_index_mask | (x as u32) << bit_offset[0],
-                self.min.y & y_index_mask | (y as u32) << bit_offset[1],
-                self.min.z & z_index_mask | (z as u32) << bit_offset[2],
+                self.min.x & x_index_mask | ((x as u32) << bit_offset[0]),
+                self.min.y & y_index_mask | ((y as u32) << bit_offset[1]),
+                self.min.z & z_index_mask | ((z as u32) << bit_offset[2]),
             ),
             extent: self.extent,
         }

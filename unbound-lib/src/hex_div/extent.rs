@@ -253,8 +253,8 @@ impl HasExtent for Extent {
 impl From<ExtentCompact> for Extent {
     fn from(value: ExtentCompact) -> Self {
         Self {
-            x: (value.splits >> 10 & 0x1F) as u8,
-            y: (value.splits >> 5 & 0x1F) as u8,
+            x: ((value.splits >> 10) & 0x1F) as u8,
+            y: ((value.splits >> 5) & 0x1F) as u8,
             z: (value.splits & 0x1F) as u8,
         }
     }
@@ -497,7 +497,7 @@ pub struct ExtentCompact {
 impl From<Extent> for ExtentCompact {
     fn from(value: Extent) -> Self {
         Self {
-            splits: (value.x as u16) << 10 | (value.y as u16) << 5 | (value.z as u16),
+            splits: ((value.x as u16) << 10) | ((value.y as u16) << 5) | (value.z as u16),
         }
     }
 }

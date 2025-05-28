@@ -133,7 +133,7 @@ impl<C: BitCache> HexDivNode for BitNode<C> {
         match &self.0 {
             Repr::Leaf(_, _) => panic!("leaf nodes have no children"),
             Repr::Leaves(extent, leaves) => {
-                NodeRef::Leaf(extent.child_extent(), 1 << index & leaves != 0)
+                NodeRef::Leaf(extent.child_extent(), (1 << index) & leaves != 0)
             }
             Repr::Parent1(_, node) => NodeRef::Node(&node.children[index]),
             Repr::Parent2(_, node) => NodeRef::Node(&node.children[index]),

@@ -144,7 +144,7 @@ impl PlanePoint {
 
     fn new(corner: Corner3, facing: Facing3) -> PlanePoint {
         Self {
-            corner_facing: (corner as u8) | (facing as u8) << 3,
+            corner_facing: (corner as u8) | ((facing as u8) << 3),
         }
     }
 
