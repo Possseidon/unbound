@@ -108,8 +108,8 @@ impl<C: BitCache> HexDivNode for BitNode<C> {
     fn as_data(&self) -> NodeDataRef<Self> {
         match &self.0 {
             Repr::Leaf(_, leaf) => NodeDataRef::Leaf(*leaf),
-            Repr::Leaves(_, leaves) => {
-                NodeDataRef::Parent(&(), C::compute_cache_from_bits(*leaves))
+            Repr::Leaves(extent, leaves) => {
+                NodeDataRef::Parent(&(), C::compute_cache_from_bits(*extent, *leaves))
             }
             Repr::Parent1(_, node) => NodeDataRef::Parent(&(), node.cache),
             Repr::Parent2(_, node) => NodeDataRef::Parent(&(), node.cache),
@@ -337,7 +337,7 @@ pub trait BitCache: for<'a> Cache<bool, Ref<'a> = Self> + Copy {
     /// This way it can take advantage of things like [`u64::count_ones`].
     ///
     /// For nodes with less than `64` leaves, [`BitNode`] guarantees the MSBs to be padded with `0`.
-    fn compute_cache_from_bits(bits: u64) -> Self;
+    fn compute_cache_from_bits(extent: Splittable<CachedExtent>, bits: u64) -> Self;
 }
 
 /// The default [`BitCache`] for [`BitNode`] that doesn't cache anything.
@@ -353,7 +353,7 @@ impl<T> Cache<T> for NoBitCache {
 }
 
 impl BitCache for NoBitCache {
-    fn compute_cache_from_bits(_: u64) -> Self {
+    fn compute_cache_from_bits(_: Splittable<CachedExtent>, _: u64) -> Self {
         Self
     }
 }
@@ -385,7 +385,7 @@ impl Cache<bool> for Count {
 }
 
 impl BitCache for Count {
-    fn compute_cache_from_bits(value: u64) -> Self {
-        Self(value.count_ones().into())
+    fn compute_cache_from_bits(extent: Splittable<CachedExtent>, value: u64) -> Self {
+        Self(u128::from(value.count_ones()) << extent.child_extent().total_splits())
     }
 }
