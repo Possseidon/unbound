@@ -52,7 +52,7 @@ impl Advance {
     }
 }
 
-/// `a` is always advanced, `b` is only advanced if if needs to catch up to the new bounds of `a`.
+/// `a` is always advanced, `b` is only advanced if it needs to catch up to the new bounds of `a`.
 fn zipped_advance<A, B>(a: &mut A, b: &mut B) -> (CachedBounds, (A::Node, B::Node))
 where
     A: HexDivIterator,

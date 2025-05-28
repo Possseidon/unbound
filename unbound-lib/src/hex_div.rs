@@ -12,7 +12,7 @@ use std::fmt;
 use extent::Extent;
 use glam::UVec3;
 // use iter::Iter;
-use node::{HexDivDebug, HexDivNode};
+use node::{iter::HexDivIterator, HexDivDebug, HexDivNode};
 
 use crate::math::bounds::UBounds3;
 
@@ -63,9 +63,12 @@ impl<T: HexDivNode> HexDiv<T> {
         }
     }
 
-    // pub fn iter(&self) -> Iter<T> {
-    //     Iter::new(self.bounds, &self.root)
-    // }
+    pub fn iter(&self) -> impl Iterator<Item = (UBounds3, NodeRef<T>)> {
+        self.root
+            .iter()
+            .filter_bounds(within(self.bounds))
+            .map(|(bounds, node)| (bounds, node))
+    }
 }
 
 impl<T: HexDivNode> fmt::Debug for HexDiv<T>
@@ -82,11 +85,8 @@ where
 
 impl<T: HexDivNode> PartialEq for HexDiv<T> {
     fn eq(&self, other: &Self) -> bool {
-        if self.bounds.size() != other.bounds.size() {
-            return false;
-        }
-
-        todo!("self.iter().zip(other).all(|(_, lhs, rhs)| lhs == rhs))");
+        self.bounds.size() == other.bounds.size()
+        // TODO: && self.iter().zip(other).all(|(_, lhs, rhs)| lhs == rhs)
     }
 }
 
