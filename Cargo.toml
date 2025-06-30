@@ -9,7 +9,7 @@ arrayvec = "0.7.6"
 # bevy = "0.15.1"
 bitvec = "1.0.1"
 enum-map = "2.7.3"
-enumset = "1.1.5"
+enumset = "1.1.6"
 glam = "0.29.2"
 itertools = "0.14.0"
 
