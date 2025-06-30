@@ -10,7 +10,7 @@ arrayvec = "0.7.6"
 bitvec = "1.0.1"
 enum-map = "2.7.3"
 enumset = "1.1.5"
-glam = "0.29.2"
+glam = "0.29.3"
 itertools = "0.14.0"
 
 unbound-lib = { path = "unbound-lib" }
